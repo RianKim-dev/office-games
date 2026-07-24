@@ -1,0 +1,141 @@
+-- office-games / 빙고 스키마
+-- Supabase SQL Editor에서 그대로 실행하세요. 여러 번 실행해도 안전하도록 작성했습니다.
+
+-- 게임 종류별로 독립적으로 증가하는 방 번호 카운터 (예: BINGO-1, BINGO-2 ... 나중에 다른 게임이 추가되면 그 게임만의 번호로 별도 시작)
+create table if not exists room_counters (
+  game_type text primary key,
+  next_number int not null default 1
+);
+
+-- 이 테이블은 next_room_number() 함수(security definer)를 통해서만 접근한다.
+-- RLS를 켜고 정책은 하나도 안 만들어서 anon/authenticated의 직접 접근을 전부 막는다 —
+-- 함수는 security definer라 RLS를 우회하므로 정상 동작한다.
+alter table room_counters enable row level security;
+
+create or replace function next_room_number(p_game_type text)
+returns int
+language sql
+security definer
+set search_path = public
+as $$
+  insert into room_counters (game_type, next_number)
+  values (p_game_type, 2)
+  on conflict (game_type) do update set next_number = room_counters.next_number + 1
+  returning next_number - 1;
+$$;
+
+grant execute on function next_room_number(text) to anon;
+
+create table if not exists rooms (
+  id text primary key,
+  topic text,
+  size smallint not null check (size in (4, 5)),
+  win_condition smallint not null check (win_condition in (1, 2, 3)),
+  timed boolean not null default false,
+  status text not null default 'waiting',
+  host_id text not null,
+  turn_order jsonb,
+  current_turn_index int,
+  current_call jsonb,
+  turn_deadline timestamptz,
+  fill_deadline timestamptz,
+  winner_id text,
+  created_at timestamptz not null default now(),
+  last_activity_at timestamptz not null default now()
+);
+
+create table if not exists players (
+  id text primary key,
+  room_id text not null references rooms (id) on delete cascade,
+  name text not null,
+  board jsonb not null default '[]'::jsonb,
+  is_ready boolean not null default false,
+  is_eliminated boolean not null default false,
+  is_host boolean not null default false,
+  joined_at timestamptz not null default now()
+);
+
+create index if not exists players_room_id_idx on players (room_id);
+
+-- 아래는 1단계(빙고 전용 waiting 없는 버전)에서 이미 rooms/players 테이블을 만든 적이 있어도
+-- 안전하게 다시 실행할 수 있도록 하는 마이그레이션. 신규 설치에서도 그대로 동작한다.
+alter table rooms add column if not exists game_type text not null default 'bingo';
+alter table rooms add column if not exists room_number int not null default 0;
+alter table rooms add column if not exists display_name text not null default 'Untitled';
+alter table rooms add column if not exists max_players smallint not null default 4;
+alter table rooms add column if not exists round_number int not null default 1;
+alter table rooms alter column topic drop not null;
+alter table rooms alter column status set default 'waiting';
+
+do $$
+begin
+  alter table rooms drop constraint if exists rooms_status_check;
+  alter table rooms add constraint rooms_status_check
+    check (status in ('waiting', 'filling', 'playing', 'ended'));
+  alter table rooms drop constraint if exists rooms_max_players_check;
+  alter table rooms add constraint rooms_max_players_check
+    check (max_players between 2 and 8);
+end $$;
+
+alter table players alter column board set default '[]'::jsonb;
+
+-- RLS: 로그인이 없는 캐주얼 용도라 사용자별 정책은 만들 수 없음.
+-- anon key로 전체 select/insert/update/delete를 허용하고,
+-- 실질적인 보안은 "추측 불가능한 8자리 방 코드"에 의존한다.
+alter table rooms enable row level security;
+alter table players enable row level security;
+
+drop policy if exists "anon read rooms" on rooms;
+drop policy if exists "anon insert rooms" on rooms;
+drop policy if exists "anon update rooms" on rooms;
+drop policy if exists "anon delete rooms" on rooms;
+create policy "anon read rooms" on rooms for select to anon using (true);
+create policy "anon insert rooms" on rooms for insert to anon with check (true);
+create policy "anon update rooms" on rooms for update to anon using (true) with check (true);
+create policy "anon delete rooms" on rooms for delete to anon using (true);
+
+drop policy if exists "anon read players" on players;
+drop policy if exists "anon insert players" on players;
+drop policy if exists "anon update players" on players;
+drop policy if exists "anon delete players" on players;
+create policy "anon read players" on players for select to anon using (true);
+create policy "anon insert players" on players for insert to anon with check (true);
+create policy "anon update players" on players for update to anon using (true) with check (true);
+create policy "anon delete players" on players for delete to anon using (true);
+
+-- Realtime: rooms/players 테이블 변경을 클라이언트에 push
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'rooms'
+  ) then
+    alter publication supabase_realtime add table rooms;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'players'
+  ) then
+    alter publication supabase_realtime add table players;
+  end if;
+end $$;
+
+-- 방 자동 정리 (터뜨리기): 무료 티어에서도 쓸 수 있는 pg_cron으로 30분마다 스윕.
+-- ended 상태는 이제 "In Review"(방금 끝남)/"Done"(시간 지남) 두 단계로 화면에 표시되며
+-- 방장이 같은 방에서 라운드를 이어갈 수 있으므로, 종료됐다고 바로 지우지 않는다.
+-- - 플레이어가 0명인 방은 즉시 정리 대상 (강퇴/퇴장 시 클라이언트에서도 즉시 삭제 시도함)
+-- - ended 상태로 24시간 넘게 방치된 방(=Done으로 표시되고도 한참 지난 방) 삭제
+-- - 그 외 상태에서도 활동이 2시간 이상 없으면 삭제
+-- (랜딩 접속 시 클라이언트에서도 보조로 한 번 더 스윕함 — src/lib/room.ts의 sweepExpiredRooms)
+create extension if not exists pg_cron;
+
+select cron.schedule(
+  'cleanup-expired-bingo-rooms',
+  '*/30 * * * *',
+  $$
+    delete from rooms r where not exists (select 1 from players p where p.room_id = r.id);
+    delete from rooms where status = 'ended' and last_activity_at < now() - interval '24 hours';
+    delete from rooms where last_activity_at < now() - interval '2 hours';
+  $$
+);
