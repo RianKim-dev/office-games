@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createBingoRoom, getSavedDisplayName } from '../../lib/room'
+import { createBingoRoom } from '../../lib/room'
+import { useDisplayName } from '../../lib/useDisplayName'
 import AppShell from '../../components/AppShell'
 
 export default function BingoSetup() {
@@ -9,7 +10,7 @@ export default function BingoSetup() {
   const [winCondition, setWinCondition] = useState<1 | 2 | 3>(1)
   const [timed, setTimed] = useState(false)
   const [maxPlayers, setMaxPlayers] = useState(4)
-  const [hostName, setHostName] = useState(getSavedDisplayName())
+  const { name: hostName } = useDisplayName()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -37,16 +38,6 @@ export default function BingoSetup() {
   return (
     <AppShell title="Projects" heading="새 프로젝트">
       <div className="setup-form">
-        <label className="field">
-          <span className="field-label">표시 이름</span>
-          <input
-            className="doc-input"
-            value={hostName}
-            onChange={(e) => setHostName(e.target.value)}
-            placeholder="예: 김철수"
-          />
-        </label>
-
         <div className="field">
           <span className="field-label">게임 종류</span>
           <div className="segmented">

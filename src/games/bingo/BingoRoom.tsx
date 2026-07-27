@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   clearSavedPlayerId,
-  getSavedDisplayName,
   getSavedPlayerId,
   joinBingoRoom,
   sweepExpiredRooms,
 } from '../../lib/room'
+import { useDisplayName } from '../../lib/useDisplayName'
 import { useBingoRoom } from './useBingoRoom'
 import BingoWaiting from './BingoWaiting'
 import BingoFill from './BingoFill'
@@ -16,54 +16,46 @@ import AppShell from '../../components/AppShell'
 
 export default function BingoRoom() {
   const { code } = useParams<{ code: string }>()
+  const navigate = useNavigate()
   const roomId = code ?? ''
   const [playerId, setPlayerId] = useState<string | null>(() =>
     roomId ? getSavedPlayerId(roomId) : null,
   )
-  const [joinName, setJoinName] = useState(getSavedDisplayName())
-  const [joining, setJoining] = useState(false)
+  const { name: displayName } = useDisplayName()
   const [joinError, setJoinError] = useState<string | null>(null)
+  // StrictMode에서 effect가 두 번 돌아 플레이어가 중복 생성되는 걸 막는다
+  const joinAttempted = useRef(false)
 
   useEffect(() => {
     sweepExpiredRooms()
   }, [])
 
-  async function handleJoin() {
-    if (!roomId || !joinName.trim()) return
-    setJoining(true)
-    setJoinError(null)
-    try {
-      const { playerId: id } = await joinBingoRoom(roomId, joinName.trim())
-      setPlayerId(id)
-    } catch (e) {
-      setJoinError(e instanceof Error ? e.message : '참여에 실패했어요')
-    } finally {
-      setJoining(false)
+  // 이름은 이미 정해져 있으므로 폼 없이 바로 입장시킨다
+  useEffect(() => {
+    if (playerId || !roomId || joinAttempted.current) return
+    if (!displayName) {
+      navigate('/')
+      return
     }
-  }
+    joinAttempted.current = true
+    joinBingoRoom(roomId, displayName)
+      .then(({ playerId: id }) => setPlayerId(id))
+      .catch((e) => setJoinError(e instanceof Error ? e.message : '참여에 실패했어요'))
+  }, [playerId, roomId, displayName, navigate])
 
   if (!playerId) {
     return (
       <AppShell title="Projects" heading="프로젝트 열기">
-        <div className="setup-form">
-          <label className="field">
-            <span className="field-label">표시 이름</span>
-            <input
-              className="doc-input"
-              value={joinName}
-              onChange={(e) => setJoinName(e.target.value)}
-              placeholder="예: 김철수"
-            />
-          </label>
-          {joinError && <p className="form-error">{joinError}</p>}
-          <button
-            className="doc-btn doc-btn--wide"
-            disabled={!joinName.trim() || joining}
-            onClick={handleJoin}
-          >
-            {joining ? '입장하는 중…' : '입장'}
-          </button>
-        </div>
+        {joinError ? (
+          <div className="setup-form">
+            <p className="form-error">{joinError}</p>
+            <button className="doc-btn doc-btn--wide" onClick={() => navigate('/')}>
+              목록으로
+            </button>
+          </div>
+        ) : (
+          <p className="notice notice--muted">입장하는 중…</p>
+        )}
       </AppShell>
     )
   }
@@ -74,6 +66,9 @@ export default function BingoRoom() {
       playerId={playerId}
       onResetPlayer={() => {
         clearSavedPlayerId(roomId)
+        // 가드를 풀어줘야 위 자동 입장 effect가 다시 시도한다
+        joinAttempted.current = false
+        setJoinError(null)
         setPlayerId(null)
       }}
     />

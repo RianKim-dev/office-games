@@ -129,6 +129,23 @@ input {
   gap: 8px;
   align-items: center;
 }
+.name-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 12px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.name-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.name-chip-input {
+  width: 120px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
 .toolbar-create {
   background: var(--accent);
   border: 1px solid var(--accent);
