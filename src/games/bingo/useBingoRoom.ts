@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { clearSavedPlayerId, reconcileRoomMembership, shuffle, touchRoom } from '../../lib/room'
 import type { BingoCell, Player, Room } from '../../lib/types'
@@ -51,18 +51,35 @@ export function useBingoRoom(roomId: string, playerId: string) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
+        { event: 'INSERT', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
         (payload) => {
-          setPlayers((prev) => {
-            if (payload.eventType === 'DELETE') {
-              return prev.filter((pl) => pl.id !== (payload.old as Player).id)
-            }
-            const updated = payload.new as Player
-            const exists = prev.some((pl) => pl.id === updated.id)
-            return exists
+          const added = payload.new as Player
+          setPlayers((prev) => (prev.some((pl) => pl.id === added.id) ? prev : [...prev, added]))
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` },
+        (payload) => {
+          const updated = payload.new as Player
+          setPlayers((prev) =>
+            prev.some((pl) => pl.id === updated.id)
               ? prev.map((pl) => (pl.id === updated.id ? updated : pl))
-              : [...prev, updated]
-          })
+              : [...prev, updated],
+          )
+        },
+      )
+      // DELETE는 필터를 걸 수 없다. Postgres가 DELETE 이벤트에 실어주는 old 레코드에는
+      // 기본키(id)만 들어있어서 room_id 필터가 절대 매칭되지 않고 이벤트가 통째로 버려진다
+      // (그래서 강퇴/퇴장이 상대 화면에 반영되지 않았다).
+      // 필터 없이 받은 뒤, 내가 들고 있는 목록에 있는 id일 때만 제거한다.
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'players' },
+        (payload) => {
+          const goneId = (payload.old as Partial<Player>).id
+          if (!goneId) return
+          setPlayers((prev) => prev.filter((pl) => pl.id !== goneId))
         },
       )
       .subscribe()
@@ -82,22 +99,36 @@ export function useBingoRoom(roomId: string, playerId: string) {
     if (me.is_ready || me.is_eliminated) return
     const deadline = new Date(room.fill_deadline).getTime()
     const timer = setInterval(() => {
-      if (Date.now() >= deadline) {
-        supabase.from('players').update({ is_eliminated: true }).eq('id', playerId).eq('is_ready', false)
-      }
+      if (Date.now() < deadline) return
+      clearInterval(timer)
+      // supabase 쿼리 빌더는 lazy라 await(=then) 하지 않으면 요청이 전송되지 않는다.
+      void supabase
+        .from('players')
+        .update({ is_eliminated: true })
+        .eq('id', playerId)
+        .eq('is_ready', false)
+        .then(({ error }) => {
+          if (error) setError(error.message)
+        })
     }, 1000)
     return () => clearInterval(timer)
   }, [room, me, playerId])
 
-  // 전원 준비 완료 시 게임 시작 (한 번만 성공하도록 status 가드)
+  // 전원 준비 완료 시 게임 시작.
+  // 모든 클라이언트가 동시에 시도하지만 .eq('status','filling') 가드 때문에 한 번만 성공한다.
+  const startingRef = useRef(false)
   useEffect(() => {
-    if (!room || room.status !== 'filling') return
+    if (!room || room.status !== 'filling') {
+      startingRef.current = false
+      return
+    }
     if (activePlayers.length === 0) return
-    const allReady = activePlayers.every((p) => p.is_ready)
-    if (!allReady) return
+    if (!activePlayers.every((p) => p.is_ready)) return
+    if (startingRef.current) return // 요청 진행 중 중복 발사 방지
+    startingRef.current = true
 
     const order = shuffle(activePlayers.map((p) => p.id))
-    supabase
+    void supabase
       .from('rooms')
       .update({
         status: 'playing',
@@ -109,6 +140,12 @@ export function useBingoRoom(roomId: string, playerId: string) {
       })
       .eq('id', roomId)
       .eq('status', 'filling')
+      .then(({ error }) => {
+        if (error) {
+          startingRef.current = false
+          setError(error.message)
+        }
+      })
   }, [room, activePlayers, roomId])
 
   const findNextTurnIndex = useCallback(
