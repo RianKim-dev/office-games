@@ -112,7 +112,16 @@ export function useBingoRoom(roomId: string, playerId: string) {
     }
     beat()
     const timer = setInterval(beat, 20_000)
-    return () => clearInterval(timer)
+    // 백그라운드에 있는 동안 타이머가 조여지거나 얼 수 있으므로,
+    // 탭으로 돌아오는 순간 곧바로 살아있음을 알린다.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') beat()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [playerId])
 
   // 오래 응답이 없는 참가자 정리. 접속해 있는 아무 클라이언트나 수행하며,

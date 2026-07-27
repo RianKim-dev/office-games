@@ -51,7 +51,10 @@ export default function ProjectList({ query = '' }: { query?: string }) {
             {playerCount}/{room.max_players}
             {onlineCount > 0 && <span className="project-row-online"> · {onlineCount}명 접속</span>}
           </span>
-          {!canJoin && blockedReason && <span className="project-row-block">{blockedReason}</span>}
+          {/* 상태 pill과 같은 말이면 두 번 쓰지 않는다 */}
+          {!canJoin && blockedReason && blockedReason !== STATUS_LABEL[status] && (
+            <span className="project-row-block">{blockedReason}</span>
+          )}
           <span className={`status-pill status-pill--${status}`}>{STATUS_LABEL[status]}</span>
         </button>
       ))}

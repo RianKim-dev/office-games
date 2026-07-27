@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { displayStatus, isOnline } from './room'
+import { displayStatus, isOnline, sweepExpiredRooms } from './room'
 import type { DisplayStatus, Room } from './types'
 
 /** 목록에 보이는 상태. 'stale'은 아무도 접속해 있지 않은 진행중 방 */
@@ -97,7 +97,11 @@ export function useProjectList() {
       }
     }
 
-    refresh()
+    // 목록을 여는 순간이 죽은 방을 걷어낼 가장 좋은 시점이다.
+    // (cron은 5분 주기라 그 사이에 만들어진 시체가 목록에 남는다)
+    void sweepExpiredRooms()
+      .then(refresh)
+      .catch(() => refresh())
 
     let debounceTimer: ReturnType<typeof setTimeout>
     const scheduleRefresh = () => {

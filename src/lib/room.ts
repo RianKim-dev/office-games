@@ -57,10 +57,17 @@ export function displayStatus(room: Room): DisplayStatus {
   return elapsed < IN_REVIEW_MS ? 'in_review' : 'done'
 }
 
-/** 이 시간 넘게 소식이 없으면 접속이 끊긴 것으로 본다 (배지 표시용) */
-export const OFFLINE_MS = 60 * 1000
-/** 이 시간 넘으면 자동으로 내보낸다 */
-export const DROP_MS = 90 * 1000
+/**
+ * 접속 판정 기준.
+ *
+ * 이 앱은 백그라운드 탭에 띄워두고 쓰는 게 전제인데, 크롬은 숨겨진 탭의 타이머를
+ * 1분에 한 번까지 조이고 5분 넘게 숨겨져 있으면 얼려버린다. 그래서 기준을 빡빡하게
+ * 잡으면 "다른 탭에서 일하는 사이에 조용히 퇴장당하는" 일이 생긴다.
+ * 유령을 늦게 걷어내는 손해보다 멀쩡한 사람을 쫓아내는 손해가 훨씬 크므로 넉넉하게 둔다.
+ */
+export const OFFLINE_MS = 90 * 1000
+/** 이 시간 넘으면 자동으로 내보낸다 (백그라운드 스로틀링 주기의 3배 이상) */
+export const DROP_MS = 3 * 60 * 1000
 
 export function isOnline(lastSeenAt: string | null | undefined): boolean {
   if (!lastSeenAt) return false
@@ -69,6 +76,8 @@ export function isOnline(lastSeenAt: string | null | undefined): boolean {
 
 const ENDED_TTL_MS = 30 * 60 * 1000
 const ABANDONED_TTL_MS = 10 * 60 * 1000
+/** 방을 통째로 지울 땐 개인 퇴장보다 더 보수적으로 본다 (얼어붙은 탭 오판 방지) */
+const ROOM_PRESENCE_MS = 5 * 60 * 1000
 
 /**
  * pg_cron이 5분마다 정리하지만, 랜딩을 여는 시점에도 보조로 한 번 스윕한다.
@@ -87,7 +96,7 @@ export async function sweepExpiredRooms() {
     .from('rooms')
     .select('id, players(last_seen_at)')
     .lt('last_activity_at', abandonedCutoff)
-  const dropCutoff = now - DROP_MS
+  const dropCutoff = now - ROOM_PRESENCE_MS
   const dead = (stale ?? [])
     .filter((r) => {
       const members = (r as { players?: { last_seen_at: string }[] }).players ?? []

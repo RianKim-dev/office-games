@@ -149,11 +149,13 @@ select cron.schedule(
   $$
     delete from rooms r where not exists (select 1 from players p where p.room_id = r.id);
 
+    -- 두 조건이 모두 맞아야 지운다: 10분간 아무 진행이 없었고, 5분간 접속자도 없었다.
+    -- 백그라운드 탭은 타이머가 얼어 신호가 늦게 오므로 접속 판정을 넉넉히 잡는다.
     delete from rooms r
     where r.last_activity_at < now() - interval '10 minutes'
       and not exists (
         select 1 from players p
-        where p.room_id = r.id and p.last_seen_at > now() - interval '90 seconds'
+        where p.room_id = r.id and p.last_seen_at > now() - interval '5 minutes'
       );
 
     delete from rooms where status = 'ended' and last_activity_at < now() - interval '30 minutes';

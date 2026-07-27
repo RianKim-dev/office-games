@@ -124,8 +124,11 @@ function ConnectedRoom({
   if (!me) {
     if (hadMe.current) {
       return (
-        <div className="bare-shell notice notice--error">
-          방장에게 강퇴되었거나 방을 나갔어요.{' '}
+        <div className="bare-shell notice">
+          이 방에서 나가졌어요. 직접 나갔거나, 방장이 내보냈거나, 오랫동안 연결이 끊겨 있었을 수 있어요.{' '}
+          <button className="doc-btn" onClick={onResetPlayer}>
+            다시 입장
+          </button>{' '}
           <button className="doc-btn" onClick={() => navigate('/')}>
             목록으로
           </button>
