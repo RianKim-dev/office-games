@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { clearSavedPlayerId, deleteRoomIfEmpty, shuffle, touchRoom } from '../../lib/room'
+import { clearSavedPlayerId, reconcileRoomMembership, shuffle, touchRoom } from '../../lib/room'
 import type { BingoCell, Player, Room } from '../../lib/types'
 import { createEmptyBoard, hasWon, isBoardCleared, isBoardFilled } from './bingoLogic'
 
@@ -175,9 +175,11 @@ export function useBingoRoom(roomId: string, playerId: string) {
   )
 
   const setReady = useCallback(
-    async (ready: boolean) => {
+    // board를 넘기면 그걸로 검증한다. 방금 저장한 보드의 realtime 에코가 아직
+    // 도착하지 않았을 때 me.board가 옛날 값이라 준비가 조용히 무시되는 걸 막는다.
+    async (ready: boolean, board?: BingoCell[]) => {
       if (!me) return
-      if (ready && !isBoardFilled(me.board)) return
+      if (ready && !isBoardFilled(board ?? me.board)) return
       await supabase.from('players').update({ is_ready: ready }).eq('id', playerId)
       await touchRoom(roomId)
     },
@@ -311,14 +313,14 @@ export function useBingoRoom(roomId: string, playerId: string) {
     async (targetId: string) => {
       if (!isHost || targetId === playerId) return
       await supabase.from('players').delete().eq('id', targetId)
-      await deleteRoomIfEmpty(roomId)
+      await reconcileRoomMembership(roomId)
     },
     [isHost, playerId, roomId],
   )
 
   const leaveRoom = useCallback(async () => {
     await supabase.from('players').delete().eq('id', playerId)
-    await deleteRoomIfEmpty(roomId)
+    await reconcileRoomMembership(roomId)
     clearSavedPlayerId(roomId)
   }, [playerId, roomId])
 

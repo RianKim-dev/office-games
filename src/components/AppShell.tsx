@@ -16,11 +16,25 @@ interface Props {
   space?: string
   title: string
   heading?: string
+  searchPlaceholder?: string
+  /** 넘기면 검색창이 실제로 동작하고, 안 넘기면 위장용 장식으로만 남는다 */
+  search?: string
+  onSearchChange?: (value: string) => void
   right?: ReactNode
   children: ReactNode
 }
 
-export default function AppShell({ space = 'Spaces', title, heading, right, children }: Props) {
+export default function AppShell({
+  space = 'Spaces',
+  title,
+  heading,
+  searchPlaceholder = 'Search board',
+  search,
+  onSearchChange,
+  right,
+  children,
+}: Props) {
+  const searchable = onSearchChange !== undefined
   return (
     <div className="shell">
       <div className="shell-top">
@@ -45,7 +59,13 @@ export default function AppShell({ space = 'Spaces', title, heading, right, chil
       </div>
 
       <div className="shell-toolbar">
-        <input className="shell-search" placeholder="Search board" readOnly />
+        <input
+          className="shell-search"
+          placeholder={searchPlaceholder}
+          value={searchable ? (search ?? '') : undefined}
+          onChange={searchable ? (e) => onSearchChange(e.target.value) : undefined}
+          readOnly={!searchable}
+        />
         <span className="shell-toolbar-btn">Filter</span>
         <span className="shell-toolbar-btn">Group</span>
         {right && <div className="shell-toolbar-right">{right}</div>}

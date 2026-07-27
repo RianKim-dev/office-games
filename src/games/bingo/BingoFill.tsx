@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { BingoCell, Player, Room } from '../../lib/types'
 import { isBoardFilled } from './bingoLogic'
 import { CardFooter, CardTop } from './CardParts'
@@ -11,15 +11,19 @@ interface Props {
   me: Player
   players: Player[]
   setBoard: (board: BingoCell[]) => Promise<void>
-  setReady: (ready: boolean) => Promise<void>
+  setReady: (ready: boolean, board?: BingoCell[]) => Promise<void>
 }
 
 export default function BingoFill({ room, me, players, setBoard, setReady }: Props) {
   const [board, setLocalBoard] = useState(me.board)
   const [copied, setCopied] = useState(false)
+  // 내가 입력 중인 동안에는 서버 에코가 로컬 상태를 덮어쓰지 못하게 막는다.
+  // (안 막으면 내 예전 보드가 되돌아와 방금 친 글자가 사라진다)
+  const dirty = useRef(false)
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (!me.is_ready) setLocalBoard(me.board)
+    if (!me.is_ready && !dirty.current) setLocalBoard(me.board)
   }, [me.board, me.is_ready])
 
   const [remaining, setRemaining] = useState<number | null>(null)
@@ -35,10 +39,40 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
     return () => clearInterval(timer)
   }, [room.fill_deadline])
 
+  // 키 입력마다 DB에 쓰면 25칸 × 글자수만큼 쓰기가 발생하고, 그 변경이 realtime으로
+  // 다시 브로드캐스트되며 입력이 튄다. 입력이 멎은 뒤 한 번만 저장한다.
   function updateCell(index: number, text: string) {
     const next = board.map((c) => (c.index === index ? { ...c, text } : c))
     setLocalBoard(next)
-    setBoard(next)
+    dirty.current = true
+    if (flushTimer.current) clearTimeout(flushTimer.current)
+    flushTimer.current = setTimeout(() => {
+      setBoard(next).finally(() => {
+        dirty.current = false
+      })
+    }, 500)
+  }
+
+  /** 준비 완료처럼 즉시 반영돼야 하는 시점엔 대기 중인 저장을 먼저 밀어낸다 */
+  async function flushBoard() {
+    if (flushTimer.current) {
+      clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+    if (!dirty.current) return
+    await setBoard(board)
+    dirty.current = false
+  }
+
+  useEffect(() => {
+    return () => {
+      if (flushTimer.current) clearTimeout(flushTimer.current)
+    }
+  }, [])
+
+  async function handleReady() {
+    await flushBoard()
+    await setReady(true, board)
   }
 
   async function copyLink() {
@@ -84,7 +118,7 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
       </div>
 
       {!me.is_ready && !me.is_eliminated && (
-        <button className="doc-btn doc-btn--wide" disabled={!filled} onClick={() => setReady(true)}>
+        <button className="doc-btn doc-btn--wide" disabled={!filled} onClick={handleReady}>
           준비 완료
         </button>
       )}

@@ -80,15 +80,30 @@ export async function touchRoom(roomId: string) {
     .eq('id', roomId)
 }
 
-/** 방에 남은 플레이어가 없으면 방 자체도 삭제한다 (강퇴/퇴장 직후 호출) */
-export async function deleteRoomIfEmpty(roomId: string) {
-  const { count } = await supabase
+/**
+ * 인원이 빠진 뒤 방 상태를 정리한다 (강퇴/퇴장 직후 호출).
+ * - 아무도 안 남았으면 방 삭제
+ * - 방장이 나가서 방장이 없어졌으면 가장 먼저 들어온 사람에게 위임
+ *   (위임을 안 하면 남은 사람들이 게임 시작/강퇴/이름변경을 아무도 못 해 방이 고아가 된다)
+ */
+export async function reconcileRoomMembership(roomId: string) {
+  const { data: remaining, error } = await supabase
     .from('players')
-    .select('id', { count: 'exact', head: true })
+    .select('id, is_host')
     .eq('room_id', roomId)
-  if ((count ?? 0) === 0) {
+    .order('joined_at')
+  if (error) return
+
+  if (!remaining || remaining.length === 0) {
     await supabase.from('rooms').delete().eq('id', roomId)
+    return
   }
+
+  if (remaining.some((p) => p.is_host)) return
+
+  const heir = remaining[0]
+  await supabase.from('players').update({ is_host: true }).eq('id', heir.id)
+  await supabase.from('rooms').update({ host_id: heir.id }).eq('id', roomId)
 }
 
 export interface CreateRoomInput {

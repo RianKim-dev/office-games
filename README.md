@@ -34,7 +34,22 @@ npm run dev
 
 ## 현재 상태 (2026-07-24 기준)
 
-- 빙고 1단계 + 2단계(로비/강퇴/멀티라운드/Projects 목록) 코드는 완성, 로컬 빌드/타입체크 통과
-- Supabase 프로젝트 연결 완료 (`.env.local` 설정됨, git에는 안 올라감)
-- **다음에 할 일**: `supabase/schema.sql`을 Supabase SQL Editor에서 다시 실행해서 `rooms` 테이블에 새 컬럼(`game_type`/`room_number`/`display_name`/`max_players`/`round_number`)이 반영됐는지 확인 → 브라우저 여러 탭으로 실제 로비 입장/강퇴/재시작까지 전체 플로우 e2e 테스트 → 문제 없으면 GitHub push까지 완료된 상태이니 Vercel 연동만 하면 배포 가능
-- 끝말잇기는 아직 손 안 댐 (`src/lib/gameTypes.ts`에 게임 타입 확장 지점만 마련해둠)
+- 빙고 1단계 + 2단계(로비/강퇴/멀티라운드/Projects 목록) 코드 완성, 빌드/타입체크 통과
+- Supabase 연결 완료, `schema.sql` 마이그레이션 적용 완료 — 로컬에서 방 생성/목록 실시간 반영 확인함
+- Vercel 배포됨: https://office-games-sigma.vercel.app
+
+### ⚠️ 남은 작업
+
+1. **Vercel 환경변수 설정 (필수, 아직 안 됨)** — 배포본 콘솔에 "VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY가 설정되지 않았습니다" 경고가 뜬다.
+   Vercel 프로젝트 → Settings → Environment Variables에 `.env.local`과 같은 두 값을 넣고 **재배포**해야 배포본이 동작한다.
+   (Vite는 빌드 시점에 env를 인라인하므로, 변수만 추가하고 재배포하지 않으면 반영되지 않는다.)
+2. 브라우저 탭 여러 개로 실제 대전 e2e 테스트 (로비 입장 → 게임 시작 → 턴 진행 → 강퇴 → 새 라운드)
+3. 끝말잇기는 미착수 (`src/lib/gameTypes.ts`에 게임 타입 확장 지점만 마련됨)
+
+### 코드 검수에서 고친 것 (2026-07-24)
+
+- `useProjectList`: 네트워크 실패 시 `loading`이 영원히 true로 남아 "불러오는 중…"에 멈추던 문제 (배포본에서 실제 발생). try/catch + error 상태 추가
+- `reconcileRoomMembership`: 방장이 나가면 방에 방장이 없어져 아무도 시작/강퇴를 못 하던 문제. 가장 먼저 들어온 사람에게 자동 위임
+- `BingoFill`: 키 입력마다 DB 쓰기 + realtime 에코가 로컬 입력을 덮어쓰던 레이스. 500ms 디바운스 + 입력 중 에코 무시
+- `setReady(ready, board?)`: 방금 저장한 보드의 에코가 늦어 "준비 완료"가 조용히 무시되던 레이스
+- `BingoRoom`: localStorage의 참가 정보가 만료되면 참가 폼이 안 뜨고 오류 화면에 갇히던 문제. "다시 입장" 경로 추가

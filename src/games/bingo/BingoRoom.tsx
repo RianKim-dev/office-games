@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getSavedDisplayName, getSavedPlayerId, joinBingoRoom, sweepExpiredRooms } from '../../lib/room'
+import {
+  clearSavedPlayerId,
+  getSavedDisplayName,
+  getSavedPlayerId,
+  joinBingoRoom,
+  sweepExpiredRooms,
+} from '../../lib/room'
 import { useBingoRoom } from './useBingoRoom'
 import BingoWaiting from './BingoWaiting'
 import BingoFill from './BingoFill'
@@ -62,10 +68,27 @@ export default function BingoRoom() {
     )
   }
 
-  return <ConnectedRoom roomId={roomId} playerId={playerId} />
+  return (
+    <ConnectedRoom
+      roomId={roomId}
+      playerId={playerId}
+      onResetPlayer={() => {
+        clearSavedPlayerId(roomId)
+        setPlayerId(null)
+      }}
+    />
+  )
 }
 
-function ConnectedRoom({ roomId, playerId }: { roomId: string; playerId: string }) {
+function ConnectedRoom({
+  roomId,
+  playerId,
+  onResetPlayer,
+}: {
+  roomId: string
+  playerId: string
+  onResetPlayer: () => void
+}) {
   const navigate = useNavigate()
   const {
     room,
@@ -108,7 +131,19 @@ function ConnectedRoom({ roomId, playerId }: { roomId: string; playerId: string 
         </div>
       )
     }
-    return <div className="bare-shell notice notice--error">프로젝트를 찾을 수 없어요.</div>
+    // 저장된 참가 정보가 남아있지만 실제 플레이어 행은 사라진 경우(방이 정리됐거나 이전에 강퇴됨).
+    // 그대로 두면 참가 폼이 안 뜨고 오류 화면에 갇히므로, 정리하고 다시 입장할 길을 준다.
+    return (
+      <div className="bare-shell notice">
+        이 프로젝트의 참가 정보가 만료됐어요.{' '}
+        <button className="doc-btn" onClick={onResetPlayer}>
+          다시 입장
+        </button>{' '}
+        <button className="doc-btn" onClick={() => navigate('/')}>
+          목록으로
+        </button>
+      </div>
+    )
   }
 
   if (room.status === 'waiting') {

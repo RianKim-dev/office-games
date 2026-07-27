@@ -28,32 +28,51 @@ function sortRows(rows: ProjectRow[]): ProjectRow[] {
 export function useProjectList() {
   const [rows, setRows] = useState<ProjectRow[]>([])
   const [loading, setLoading] = useState(true)
-
-  async function refresh() {
-    const [{ data: rooms }, { data: players }] = await Promise.all([
-      supabase.from('rooms').select('*').order('last_activity_at', { ascending: false }).limit(30),
-      supabase.from('players').select('room_id, name, is_host'),
-    ])
-    const counts = new Map<string, number>()
-    const hosts = new Map<string, string>()
-    for (const p of players ?? []) {
-      counts.set(p.room_id, (counts.get(p.room_id) ?? 0) + 1)
-      if (p.is_host) hosts.set(p.room_id, p.name)
-    }
-    const built = (rooms ?? []).map((r) => {
-      const room = r as Room
-      return {
-        room,
-        playerCount: counts.get(room.id) ?? 0,
-        hostName: hosts.get(room.id) ?? null,
-        displayStatus: displayStatus(room),
-      }
-    })
-    setRows(sortRows(built))
-    setLoading(false)
-  }
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
+    async function refresh() {
+      try {
+        const [roomsRes, playersRes] = await Promise.all([
+          supabase.from('rooms').select('*').order('last_activity_at', { ascending: false }).limit(30),
+          supabase.from('players').select('room_id, name, is_host'),
+        ])
+        if (cancelled) return
+
+        const failure = roomsRes.error ?? playersRes.error
+        if (failure) {
+          setError(failure.message)
+          return
+        }
+
+        const counts = new Map<string, number>()
+        const hosts = new Map<string, string>()
+        for (const p of playersRes.data ?? []) {
+          counts.set(p.room_id, (counts.get(p.room_id) ?? 0) + 1)
+          if (p.is_host) hosts.set(p.room_id, p.name)
+        }
+        const built = (roomsRes.data ?? []).map((r) => {
+          const room = r as Room
+          return {
+            room,
+            playerCount: counts.get(room.id) ?? 0,
+            hostName: hosts.get(room.id) ?? null,
+            displayStatus: displayStatus(room),
+          }
+        })
+        setError(null)
+        setRows(sortRows(built))
+      } catch (e) {
+        // 네트워크 자체가 실패하면(잘못된 URL, 오프라인 등) supabase-js가 throw한다.
+        // 여기서 잡지 않으면 loading이 영원히 true로 남아 화면이 "불러오는 중…"에 멈춘다.
+        if (!cancelled) setError(e instanceof Error ? e.message : '네트워크 오류')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
     refresh()
 
     let debounceTimer: ReturnType<typeof setTimeout>
@@ -69,10 +88,11 @@ export function useProjectList() {
       .subscribe()
 
     return () => {
+      cancelled = true
       clearTimeout(debounceTimer)
       supabase.removeChannel(channel)
     }
   }, [])
 
-  return { rows, loading }
+  return { rows, loading, error }
 }

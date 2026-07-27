@@ -38,7 +38,12 @@ export default function BingoWaiting({
   async function handleStart() {
     if (!canStart || starting) return
     setStarting(true)
-    await startGame(useCustom ? customTopic.trim() : topic)
+    try {
+      await startGame(useCustom ? customTopic.trim() : topic)
+    } finally {
+      // 시작에 실패하면 버튼이 "시작하는 중…"에 영원히 묶이지 않도록 되돌린다
+      setStarting(false)
+    }
   }
 
   async function copyLink() {
@@ -145,11 +150,9 @@ export default function BingoWaiting({
         ))}
       </div>
 
-      {!isHost && (
-        <button className="doc-btn doc-btn--ghost" onClick={leaveRoom}>
-          나가기
-        </button>
-      )}
+      <button className="doc-btn doc-btn--ghost" onClick={leaveRoom}>
+        나가기
+      </button>
     </AppShell>
   )
 }
