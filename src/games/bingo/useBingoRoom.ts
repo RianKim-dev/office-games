@@ -413,16 +413,23 @@ export function useBingoRoom(roomId: string, playerId: string) {
   const setTopic = useCallback(
     async (topic: string) => {
       if (!isHost || !room || room.status !== 'waiting' || !topic.trim()) return
-      await supabase
+      // .select()로 돌려받아 직접 반영한다. realtime 에코만 믿으면, 구독이 붙기 전에
+      // 나간 변경은 자기 자신에게 영원히 도착하지 않는다.
+      const { data } = await supabase
         .from('rooms')
         .update({ topic: topic.trim(), last_activity_at: new Date().toISOString() })
         .eq('id', roomId)
         .eq('status', 'waiting')
+        .select()
+        .maybeSingle()
+      if (data) setRoom(data as Room)
     },
     [isHost, room, roomId],
   )
 
-  // 대기 상태인데 주제가 비어있으면 방장이 랜덤으로 하나 채워 넣는다
+  // 대기 상태인데 주제가 비어있으면 방장이 랜덤으로 하나 채워 넣는다.
+  // 이 업데이트는 방에 들어오자마자 나가기 때문에 realtime 구독보다 빠를 수 있다.
+  // 그래서 결과를 .select()로 직접 받아 반영해야 방장 화면에도 주제가 뜬다.
   const seedingTopicRef = useRef(false)
   useEffect(() => {
     if (!isHost || !room || room.status !== 'waiting' || room.topic) return
@@ -434,8 +441,11 @@ export function useBingoRoom(roomId: string, playerId: string) {
       .eq('id', roomId)
       .eq('status', 'waiting')
       .is('topic', null)
-      .then(() => {
+      .select()
+      .maybeSingle()
+      .then(({ data }) => {
         seedingTopicRef.current = false
+        if (data) setRoom(data as Room)
       })
   }, [isHost, room, roomId])
 

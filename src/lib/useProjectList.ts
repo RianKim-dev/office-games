@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { displayStatus, isOnline, sweepExpiredRooms } from './room'
+import { displayStatus, getSavedPlayerId, isOnline, sweepExpiredRooms } from './room'
 import type { DisplayStatus, Room } from './types'
 
 /** 목록에 보이는 상태. 'stale'은 아무도 접속해 있지 않은 진행중 방 */
@@ -13,6 +13,8 @@ export interface ProjectRow {
   hostName: string | null
   status: RowStatus
   canJoin: boolean
+  /** 이미 이 방의 참가자다 — 상태와 무관하게 다시 들어갈 수 있어야 한다 */
+  isMember: boolean
   /** 못 들어가는 이유 (canJoin이 false일 때) */
   blockedReason: string | null
 }
@@ -37,7 +39,7 @@ export function useProjectList() {
       try {
         const [roomsRes, playersRes] = await Promise.all([
           supabase.from('rooms').select('*').order('last_activity_at', { ascending: false }).limit(30),
-          supabase.from('players').select('room_id, name, is_host, last_seen_at'),
+          supabase.from('players').select('id, room_id, name, is_host, last_seen_at'),
         ])
         if (cancelled) return
 
@@ -50,10 +52,13 @@ export function useProjectList() {
         const counts = new Map<string, number>()
         const online = new Map<string, number>()
         const hosts = new Map<string, string>()
+        const memberOf = new Set<string>()
         for (const p of playersRes.data ?? []) {
           counts.set(p.room_id, (counts.get(p.room_id) ?? 0) + 1)
           if (isOnline(p.last_seen_at)) online.set(p.room_id, (online.get(p.room_id) ?? 0) + 1)
           if (p.is_host) hosts.set(p.room_id, p.name)
+          // 저장된 참가 정보가 실제 행과 맞아야 참가자로 인정 (자동 퇴장된 뒤의 잔여 값 배제)
+          if (getSavedPlayerId(p.room_id) === p.id) memberOf.add(p.room_id)
         }
 
         const built = (roomsRes.data ?? []).map((r) => {
@@ -67,15 +72,30 @@ export function useProjectList() {
           const isStale = (base === 'in_progress' || base === 'todo') && onlineCount === 0
           const status: RowStatus = isStale ? 'stale' : base
 
+          const isMember = memberOf.has(room.id)
+
           let canJoin = false
           let blockedReason: string | null = null
-          if (isStale) blockedReason = '중단됨'
+          if (isMember) {
+            // 이미 참가 중이면 진행 상태와 무관하게 돌아갈 수 있어야 한다.
+            // (브레드크럼이나 뒤로가기로 목록에 나온 경우 여기로 복귀한다)
+            canJoin = true
+          } else if (isStale) blockedReason = '중단됨'
           else if (base === 'in_progress') blockedReason = '진행 중'
           else if (base === 'in_review' || base === 'done') blockedReason = '종료됨'
           else if (playerCount >= room.max_players) blockedReason = '정원 참'
           else canJoin = true
 
-          return { room, playerCount, onlineCount, hostName: hosts.get(room.id) ?? null, status, canJoin, blockedReason }
+          return {
+            room,
+            playerCount,
+            onlineCount,
+            hostName: hosts.get(room.id) ?? null,
+            status,
+            canJoin,
+            isMember,
+            blockedReason,
+          }
         })
 
         built.sort((a, b) => {

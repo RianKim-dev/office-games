@@ -86,11 +86,8 @@ export default function BingoResult({ room, players, isHost, reopenRoom, leaveRo
         </div>
       )}
 
+      {/* 끝난 방에서 마지막 사람이 나가면 방이 자동으로 정리된다 */}
       <div className="btn-row" style={{ marginTop: 10 }}>
-        <button className="btn-quiet" onClick={() => navigate('/')}>
-          목록으로 (방에 남음)
-        </button>
-        {/* 끝난 방에서 마지막 사람이 나가면 방이 자동으로 정리된다 */}
         <button
           className="btn-danger-quiet"
           onClick={async () => {

@@ -149,9 +149,6 @@ export default function BingoPlay({
             />
           </DetailRow>
           <div className="btn-row">
-            <button className="btn-quiet" onClick={() => navigate('/')}>
-              목록으로 (게임 유지)
-            </button>
             <button className="btn-danger-quiet" onClick={() => setLeaving(true)}>
               나가기
             </button>

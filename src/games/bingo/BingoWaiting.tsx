@@ -155,11 +155,6 @@ export default function BingoWaiting({
             <button className="btn-secondary" onClick={copyLink}>
               {copied ? '복사됨' : '초대 링크 복사'}
             </button>
-          </div>
-          <div className="btn-row">
-            <button className="btn-quiet" onClick={() => navigate('/')}>
-              목록으로 (방에 남음)
-            </button>
             <button className="btn-danger-quiet" onClick={() => setConfirming({ kind: 'leave' })}>
               나가기
             </button>

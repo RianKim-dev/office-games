@@ -36,28 +36,31 @@ export default function ProjectList({ query = '' }: { query?: string }) {
 
   return (
     <div className="project-list">
-      {visible.map(({ room, playerCount, onlineCount, hostName, status, canJoin, blockedReason }) => (
-        <button
-          key={room.id}
-          className={`project-row ${canJoin ? '' : 'project-row--blocked'}`}
-          disabled={!canJoin}
-          title={canJoin ? undefined : `입장할 수 없어요 · ${blockedReason}`}
-          onClick={() => navigate(`/room/${room.id}`)}
-        >
-          <span className="project-row-key">{roomKey(room.game_type, room.room_number)}</span>
-          <span className="project-row-name">{room.display_name}</span>
-          <span className="project-row-meta">{hostName ?? '-'}</span>
-          <span className="project-row-meta">
-            {playerCount}/{room.max_players}
-            {onlineCount > 0 && <span className="project-row-online"> · {onlineCount}명 접속</span>}
-          </span>
-          {/* 상태 pill과 같은 말이면 두 번 쓰지 않는다 */}
-          {!canJoin && blockedReason && blockedReason !== STATUS_LABEL[status] && (
-            <span className="project-row-block">{blockedReason}</span>
-          )}
-          <span className={`status-pill status-pill--${status}`}>{STATUS_LABEL[status]}</span>
-        </button>
-      ))}
+      {visible.map(
+        ({ room, playerCount, onlineCount, hostName, status, canJoin, isMember, blockedReason }) => (
+          <button
+            key={room.id}
+            className={`project-row ${canJoin ? '' : 'project-row--blocked'}`}
+            disabled={!canJoin}
+            title={canJoin ? undefined : `입장할 수 없어요 · ${blockedReason}`}
+            onClick={() => navigate(`/room/${room.id}`)}
+          >
+            <span className="project-row-key">{roomKey(room.game_type, room.room_number)}</span>
+            <span className="project-row-name">{room.display_name}</span>
+            <span className="project-row-meta">{hostName ?? '-'}</span>
+            <span className="project-row-meta">
+              {playerCount}/{room.max_players}
+              {onlineCount > 0 && <span className="project-row-online"> · {onlineCount}명 접속</span>}
+            </span>
+            {isMember && <span className="project-row-mine">참여 중</span>}
+            {/* 상태 pill과 같은 말이면 두 번 쓰지 않는다 */}
+            {!canJoin && blockedReason && blockedReason !== STATUS_LABEL[status] && (
+              <span className="project-row-block">{blockedReason}</span>
+            )}
+            <span className={`status-pill status-pill--${status}`}>{STATUS_LABEL[status]}</span>
+          </button>
+        ),
+      )}
     </div>
   )
 }
