@@ -12,7 +12,8 @@ import { createEmptyBoard, hasWon, isBoardCleared, isBoardFilled } from './bingo
 import { randomTopic } from '../../lib/topics'
 
 const TURN_SECONDS = 30
-const FILL_SECONDS = 2 * 60
+// 2분은 16~25칸을 채우기에 너무 짧다는 피드백이 있어 늘림
+const FILL_SECONDS = 5 * 60
 
 export function useBingoRoom(roomId: string, playerId: string) {
   const [room, setRoom] = useState<Room | null>(null)

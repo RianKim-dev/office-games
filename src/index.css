@@ -1212,6 +1212,97 @@ input {
   opacity: 0.4;
 }
 
+/* 지금 무슨 차례인지 알려주는 모드 바 — 색으로 모드를 구분한다 */
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--panel-bg);
+}
+.mode-bar-tag {
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 3px;
+  padding: 4px 9px;
+  flex-shrink: 0;
+}
+.mode-bar-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mode-bar-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.mode-bar-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mode-bar-called {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fbbf24;
+}
+
+/* 내가 제시하는 차례 — 파랑 */
+.mode-bar--present {
+  border-color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-bg);
+}
+.mode-bar--present .mode-bar-tag {
+  background: var(--accent);
+  color: #08111f;
+}
+
+/* 남의 제시어에 맞춰 제출하는 차례 — 주황 */
+.mode-bar--submit {
+  border-color: #f59e0b;
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+.mode-bar--submit .mode-bar-tag {
+  background: #f59e0b;
+  color: #1a1204;
+}
+
+/* 내가 할 일이 없는 상태 — 무채색 */
+.mode-bar--idle {
+  border-left-color: var(--text-dim);
+}
+.mode-bar--idle .mode-bar-tag {
+  background: var(--panel-bg-2);
+  color: var(--text-muted);
+}
+
+/* 보드 자체도 모드 색을 입어 어떤 동작 중인지 헷갈리지 않게 한다 */
+.board-grid--present,
+.board-grid--submit {
+  border-radius: 8px;
+  padding: 8px;
+  margin-left: -8px;
+  margin-right: -8px;
+}
+.board-grid--present {
+  background: rgba(76, 154, 255, 0.06);
+  outline: 1px solid rgba(76, 154, 255, 0.28);
+}
+.board-grid--submit {
+  background: rgba(245, 158, 11, 0.06);
+  outline: 1px solid rgba(245, 158, 11, 0.3);
+}
+.board-grid--submit .card--selected {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
 /* 제시된 카드 슬롯 */
 .call-slot {
   background: var(--panel-bg);

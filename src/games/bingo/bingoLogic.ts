@@ -127,3 +127,44 @@ export function completedLineCells(board: BingoCell[], size: number): Set<number
 export function remainingCount(board: BingoCell[]): number {
   return board.filter((cell) => !cell.cleared).length
 }
+
+function normalize(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, '')
+}
+
+/** 문자 바이그램 기반 유사도 (0~1). 한글에서도 무난하게 동작한다. */
+function diceSimilarity(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0
+  const bigrams = (s: string) => {
+    const out = new Map<string, number>()
+    for (let i = 0; i < s.length - 1; i++) {
+      const g = s.slice(i, i + 2)
+      out.set(g, (out.get(g) ?? 0) + 1)
+    }
+    return out
+  }
+  const A = bigrams(a)
+  const B = bigrams(b)
+  let shared = 0
+  for (const [g, countA] of A) {
+    const countB = B.get(g)
+    if (countB) shared += Math.min(countA, countB)
+  }
+  const total = a.length - 1 + (b.length - 1)
+  return (2 * shared) / total
+}
+
+/**
+ * 제시어와 고른 카드가 "그래도 같은 걸 가리키는 것 같은지" 판단한다.
+ * 규칙상 토씨까지 같을 필요는 없으므로(도쿄 ↔ 도쿄타워), 느슨하게 본다.
+ * 실수로 엉뚱한 카드를 내는 걸 되묻기 위한 용도일 뿐 제출을 막지는 않는다.
+ */
+export function looksLikeMatch(called: string, picked: string): boolean {
+  const a = normalize(called)
+  const b = normalize(picked)
+  if (!a || !b) return true // 판단할 수 없으면 굳이 되묻지 않는다
+  if (a === b) return true
+  // 한쪽이 다른 쪽을 포함하면 같은 대상으로 본다 (오사카 ↔ 오사카성)
+  if (a.length >= 2 && b.length >= 2 && (a.includes(b) || b.includes(a))) return true
+  return diceSimilarity(a, b) >= 0.5
+}

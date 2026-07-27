@@ -217,7 +217,7 @@ export default function BingoWaiting({
             <span className="field-label">규칙</span>
             <span className="rule-summary">
               {room.size}×{room.size} · {room.win_condition}빙고 승리 ·{' '}
-              {room.timed ? '시간제한 있음 (채우기 2분 · 턴당 30초)' : '시간제한 없음'}
+              {room.timed ? '시간제한 있음 (채우기 5분 · 턴당 30초)' : '시간제한 없음'}
             </span>
           </div>
 

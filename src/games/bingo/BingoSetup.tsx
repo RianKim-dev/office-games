@@ -109,7 +109,7 @@ export default function BingoSetup() {
               있음
             </button>
           </div>
-          {timed && <p className="field-hint">채우기 최장 2분 · 턴당 30초</p>}
+          {timed && <p className="field-hint">채우기 최장 5분 · 턴당 30초</p>}
         </div>
 
         {error && <p className="form-error">{error}</p>}

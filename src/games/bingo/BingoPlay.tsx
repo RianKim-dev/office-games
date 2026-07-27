@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import type { Player, Room } from '../../lib/types'
-import { completedLineCells, countCompletedLines } from './bingoLogic'
+import { completedLineCells, countCompletedLines, looksLikeMatch } from './bingoLogic'
 import { CardFooter, CardTop } from './CardParts'
 import ColumnHeaders from './ColumnHeaders'
 import AppShell from '../../components/AppShell'
@@ -43,6 +43,7 @@ export default function BingoPlay({
 }: Props) {
   const navigate = useNavigate()
   const [leaving, setLeaving] = useState(false)
+  const [mismatch, setMismatch] = useState<{ index: number; text: string } | null>(null)
   const currentPlayerId =
     room.turn_order && room.current_turn_index !== null
       ? room.turn_order[room.current_turn_index]
@@ -166,39 +167,53 @@ export default function BingoPlay({
         </div>
       )}
 
-      {/* 제시된 카드 */}
-      <div className="call-slot">
-        {call ? (
-          <>
-            <span className="call-slot-label">검토 요청 · {call.playerName}</span>
-            <span className="call-slot-text">{call.text}</span>
-          </>
-        ) : (
-          <span className="call-slot-empty">
-            {canPresent ? '내 보드에서 항목을 하나 골라 제시하세요' : '제시를 기다리는 중…'}
-          </span>
-        )}
-      </div>
-
-      {/* 상태 안내 */}
-      {call && canSubmit && (
-        <div className="status-note">
-          <span className="status-note-icon">→</span>
-          <span>일치하는 항목을 하나 고른 뒤 제출하세요. 없으면 '일치 없음'을 누르면 돼요.</span>
+      {/*
+        지금 무엇을 하는 차례인지가 헷갈려 엉뚱한 카드를 내는 일이 있어서,
+        모드를 색과 문구로 확실히 갈라놓는다. 파랑=내가 제시 / 주황=남의 제시어에 맞춰 제출.
+      */}
+      {canPresent ? (
+        <div className="mode-bar mode-bar--present">
+          <span className="mode-bar-tag">내 차례</span>
+          <div className="mode-bar-body">
+            <span className="mode-bar-title">제시할 카드를 고르세요</span>
+            <span className="mode-bar-sub">내 보드에서 하나를 골라 모두에게 내놓습니다.</span>
+          </div>
         </div>
-      )}
-      {call && (iPresented || iSubmitted) && pendingSubmitters.length > 0 && (
-        <div className="status-note status-note--wait">
-          <span className="status-note-icon">◷</span>
-          <span>
-            {waitingNames}님의 제출을 기다리는 중… ({players.length - pendingSubmitters.length}/
-            {players.length})
-          </span>
+      ) : canSubmit ? (
+        <div className="mode-bar mode-bar--submit">
+          <span className="mode-bar-tag">제출</span>
+          <div className="mode-bar-body">
+            <span className="mode-bar-title">
+              <span className="mode-bar-called">{call!.text}</span> 와(과) 일치하는 카드를 고르세요
+            </span>
+            <span className="mode-bar-sub">
+              {call!.playerName}님이 제시했어요 · 없으면 '일치 없음'을 누르세요.
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="mode-bar mode-bar--idle">
+          <span className="mode-bar-tag">대기</span>
+          <div className="mode-bar-body">
+            <span className="mode-bar-title">
+              {call ? `제시어: ${call.text}` : `${currentPlayer?.name ?? '...'}님이 제시하는 중…`}
+            </span>
+            <span className="mode-bar-sub">
+              {call && (iPresented || iSubmitted) && pendingSubmitters.length > 0
+                ? `${waitingNames}님의 제출을 기다리는 중 (${players.length - pendingSubmitters.length}/${players.length})`
+                : '지금은 내가 할 일이 없어요.'}
+            </span>
+          </div>
         </div>
       )}
 
       <ColumnHeaders roomId={room.id} size={room.size} />
-      <div className="board-grid" style={{ gridTemplateColumns: `repeat(${room.size}, 1fr)` }}>
+      <div
+        className={`board-grid ${canPresent ? 'board-grid--present' : ''} ${
+          canSubmit ? 'board-grid--submit' : ''
+        }`}
+        style={{ gridTemplateColumns: `repeat(${room.size}, 1fr)` }}
+      >
         {me.board.map((cell) => {
           const selectable = !cell.cleared && (canPresent || canSubmit)
           return (
@@ -247,7 +262,16 @@ export default function BingoPlay({
             <button
               className="btn-primary"
               disabled={selected === null || busy}
-              onClick={() => run(() => submitTurn(selected))}
+              onClick={() => {
+                // 제시어와 많이 다르면 한 번 되묻는다. 막지는 않는다 —
+                // 토씨까지 같아야 하는 규칙이 아니기 때문.
+                const picked = me.board[selected!]
+                if (picked && call && !looksLikeMatch(call.text, picked.text)) {
+                  setMismatch({ index: selected!, text: picked.text })
+                  return
+                }
+                run(() => submitTurn(selected))
+              }}
             >
               제출
             </button>
@@ -269,6 +293,21 @@ export default function BingoPlay({
           </button>
         )}
       </div>
+
+      {mismatch && call && (
+        <ConfirmDialog
+          title="제시어와 다른 것 같아요"
+          body={`제시어는 '${call.text}'인데 '${mismatch.text}'을(를) 고르셨어요. 그래도 제출할까요?`}
+          confirmLabel="그래도 제출"
+          cancelLabel="다시 고르기"
+          onConfirm={() => {
+            const idx = mismatch.index
+            setMismatch(null)
+            run(() => submitTurn(idx))
+          }}
+          onCancel={() => setMismatch(null)}
+        />
+      )}
 
       {leaving && (
         <ConfirmDialog
