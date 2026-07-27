@@ -1,28 +1,28 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { displayStatus } from './room'
+import { displayStatus, isOnline } from './room'
 import type { DisplayStatus, Room } from './types'
+
+/** 목록에 보이는 상태. 'stale'은 아무도 접속해 있지 않은 진행중 방 */
+export type RowStatus = DisplayStatus | 'stale'
 
 export interface ProjectRow {
   room: Room
   playerCount: number
+  onlineCount: number
   hostName: string | null
-  displayStatus: DisplayStatus
+  status: RowStatus
+  canJoin: boolean
+  /** 못 들어가는 이유 (canJoin이 false일 때) */
+  blockedReason: string | null
 }
 
-const STATUS_ORDER: Record<DisplayStatus, number> = {
+const STATUS_ORDER: Record<RowStatus, number> = {
   todo: 0,
   in_review: 1,
   in_progress: 2,
   done: 3,
-}
-
-function sortRows(rows: ProjectRow[]): ProjectRow[] {
-  return [...rows].sort((a, b) => {
-    const byStatus = STATUS_ORDER[a.displayStatus] - STATUS_ORDER[b.displayStatus]
-    if (byStatus !== 0) return byStatus
-    return new Date(b.room.last_activity_at).getTime() - new Date(a.room.last_activity_at).getTime()
-  })
+  stale: 4,
 }
 
 export function useProjectList() {
@@ -37,7 +37,7 @@ export function useProjectList() {
       try {
         const [roomsRes, playersRes] = await Promise.all([
           supabase.from('rooms').select('*').order('last_activity_at', { ascending: false }).limit(30),
-          supabase.from('players').select('room_id, name, is_host'),
+          supabase.from('players').select('room_id, name, is_host, last_seen_at'),
         ])
         if (cancelled) return
 
@@ -48,22 +48,46 @@ export function useProjectList() {
         }
 
         const counts = new Map<string, number>()
+        const online = new Map<string, number>()
         const hosts = new Map<string, string>()
         for (const p of playersRes.data ?? []) {
           counts.set(p.room_id, (counts.get(p.room_id) ?? 0) + 1)
+          if (isOnline(p.last_seen_at)) online.set(p.room_id, (online.get(p.room_id) ?? 0) + 1)
           if (p.is_host) hosts.set(p.room_id, p.name)
         }
+
         const built = (roomsRes.data ?? []).map((r) => {
           const room = r as Room
-          return {
-            room,
-            playerCount: counts.get(room.id) ?? 0,
-            hostName: hosts.get(room.id) ?? null,
-            displayStatus: displayStatus(room),
-          }
+          const playerCount = counts.get(room.id) ?? 0
+          const onlineCount = online.get(room.id) ?? 0
+          const base = displayStatus(room)
+
+          // 진행중인데 아무도 접속해 있지 않으면 사실상 죽은 방이다.
+          // 예전에는 이런 방이 In Progress로 남아, 눌러보면 에러가 났다.
+          const isStale = (base === 'in_progress' || base === 'todo') && onlineCount === 0
+          const status: RowStatus = isStale ? 'stale' : base
+
+          let canJoin = false
+          let blockedReason: string | null = null
+          if (isStale) blockedReason = '중단됨'
+          else if (base === 'in_progress') blockedReason = '진행 중'
+          else if (base === 'in_review' || base === 'done') blockedReason = '종료됨'
+          else if (playerCount >= room.max_players) blockedReason = '정원 참'
+          else canJoin = true
+
+          return { room, playerCount, onlineCount, hostName: hosts.get(room.id) ?? null, status, canJoin, blockedReason }
         })
+
+        built.sort((a, b) => {
+          const byStatus = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
+          if (byStatus !== 0) return byStatus
+          return (
+            new Date(b.room.last_activity_at).getTime() - new Date(a.room.last_activity_at).getTime()
+          )
+        })
+
         setError(null)
-        setRows(sortRows(built))
+        setRows(built)
       } catch (e) {
         // 네트워크 자체가 실패하면(잘못된 URL, 오프라인 등) supabase-js가 throw한다.
         // 여기서 잡지 않으면 loading이 영원히 true로 남아 화면이 "불러오는 중…"에 멈춘다.
@@ -87,9 +111,13 @@ export function useProjectList() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, scheduleRefresh)
       .subscribe()
 
+    // 접속 여부는 시간이 지나면 바뀌므로 주기적으로도 다시 계산한다
+    const poll = setInterval(refresh, 30_000)
+
     return () => {
       cancelled = true
       clearTimeout(debounceTimer)
+      clearInterval(poll)
       supabase.removeChannel(channel)
     }
   }, [])

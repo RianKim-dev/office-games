@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { clearSavedPlayerId, reconcileRoomMembership, shuffle, touchRoom } from '../../lib/room'
+import {
+  DROP_MS,
+  clearSavedPlayerId,
+  reconcileRoomMembership,
+  shuffle,
+  touchRoom,
+} from '../../lib/room'
 import type { BingoCell, Player, Room } from '../../lib/types'
 import { createEmptyBoard, hasWon, isBoardCleared, isBoardFilled } from './bingoLogic'
 import { randomTopic } from '../../lib/topics'
@@ -93,6 +99,55 @@ export function useBingoRoom(roomId: string, playerId: string) {
   const me = useMemo(() => players.find((p) => p.id === playerId) ?? null, [players, playerId])
   const activePlayers = useMemo(() => players.filter((p) => !p.is_eliminated), [players])
   const isHost = me?.is_host ?? false
+
+  // 접속 확인 신호를 주기적으로 보낸다. 이게 있어야 브라우저를 그냥 닫은
+  // 유령 참가자를 구분해 내보낼 수 있다.
+  useEffect(() => {
+    const beat = () => {
+      void supabase
+        .from('players')
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq('id', playerId)
+        .then(() => {})
+    }
+    beat()
+    const timer = setInterval(beat, 20_000)
+    return () => clearInterval(timer)
+  }, [playerId])
+
+  // 오래 응답이 없는 참가자 정리. 접속해 있는 아무 클라이언트나 수행하며,
+  // 대상 id로 조작하므로 여러 명이 동시에 실행해도 결과가 같다.
+  const sweepingRef = useRef(false)
+  useEffect(() => {
+    if (!room || players.length === 0) return
+    const timer = setInterval(async () => {
+      if (sweepingRef.current) return
+      const cutoff = Date.now() - DROP_MS
+      const gone = players.filter(
+        (p) => p.id !== playerId && new Date(p.last_seen_at).getTime() < cutoff,
+      )
+      if (gone.length === 0) return
+
+      sweepingRef.current = true
+      try {
+        if (room.status === 'waiting') {
+          // 대기실에서는 자리를 돌려준다
+          await supabase.from('players').delete().in('id', gone.map((p) => p.id))
+          await reconcileRoomMembership(roomId)
+        } else {
+          // 게임 중에는 탈락 처리만 한다. 보드가 결과화면에 남아야 하고,
+          // 탈락자는 턴 순서와 "전원 제출" 판정에서 자동으로 빠진다.
+          const stillIn = gone.filter((p) => !p.is_eliminated).map((p) => p.id)
+          if (stillIn.length > 0) {
+            await supabase.from('players').update({ is_eliminated: true }).in('id', stillIn)
+          }
+        }
+      } finally {
+        sweepingRef.current = false
+      }
+    }, 10_000)
+    return () => clearInterval(timer)
+  }, [room, players, playerId, roomId])
 
   // 채우기 단계 시간제한: 마감 지나면 스스로 탈락 처리
   useEffect(() => {
@@ -217,6 +272,29 @@ export function useBingoRoom(roomId: string, playerId: string) {
     advancingRef.current = room.turn_seq
     void advanceTurn()
   }, [room, pendingSubmitters, advanceTurn])
+
+  // 사람들이 나가서 혼자만 남으면 그 사람 승리로 끝낸다.
+  // (안 그러면 혼자 남은 방에서 턴만 계속 돌게 된다)
+  const lastStandingRef = useRef(false)
+  useEffect(() => {
+    if (!room || room.status !== 'playing') return
+    if (activePlayers.length !== 1 || players.length === 0) return
+    if (lastStandingRef.current) return
+    lastStandingRef.current = true
+    void supabase
+      .from('rooms')
+      .update({
+        status: 'ended',
+        winner_id: activePlayers[0].id,
+        current_call: null,
+        last_activity_at: new Date().toISOString(),
+      })
+      .eq('id', roomId)
+      .eq('status', 'playing')
+      .then(({ error }) => {
+        if (error) lastStandingRef.current = false
+      })
+  }, [room, activePlayers, players, roomId])
 
   const isMyTurn = useMemo(() => {
     if (!room || room.status !== 'playing' || !room.turn_order || room.current_turn_index === null)
@@ -353,9 +431,16 @@ export function useBingoRoom(roomId: string, playerId: string) {
   }, [isHost, room, roomId])
 
   /** waiting -> filling: 전원 보드를 새로 만들어 게임을 시작한다 (주제는 이미 방에 기록되어 있다) */
+  /** 방장을 뺀 참가자 전원이 준비를 눌렀는가 (방장의 준비는 시작 버튼을 누르는 것으로 갈음) */
+  const allGuestsReady = useMemo(() => {
+    const guests = players.filter((p) => !p.is_host)
+    return guests.length > 0 && guests.every((p) => p.is_ready)
+  }, [players])
+
   const startGame = useCallback(
     async () => {
       if (!room || room.status !== 'waiting' || players.length === 0 || !room.topic) return
+      if (!allGuestsReady) return
       const now = new Date().toISOString()
 
       await Promise.all(
@@ -387,7 +472,7 @@ export function useBingoRoom(roomId: string, playerId: string) {
         .eq('id', roomId)
         .eq('status', 'waiting')
     },
-    [room, players, roomId],
+    [room, players, roomId, allGuestsReady],
   )
 
   /** ended -> waiting: 방은 그대로 두고 다음 라운드를 위한 로비로 되돌린다 */
@@ -445,6 +530,23 @@ export function useBingoRoom(roomId: string, playerId: string) {
     [isHost, roomId],
   )
 
+  /** 대기실 준비 토글. is_ready는 startGame에서 어차피 초기화되므로 그대로 재사용한다. */
+  const toggleReady = useCallback(async () => {
+    if (!me || !room || room.status !== 'waiting') return
+    await supabase.from('players').update({ is_ready: !me.is_ready }).eq('id', playerId)
+    await touchRoom(roomId)
+  }, [me, room, playerId, roomId])
+
+  const transferHost = useCallback(
+    async (targetId: string) => {
+      if (!isHost || targetId === playerId) return
+      await supabase.from('players').update({ is_host: false }).eq('id', playerId)
+      await supabase.from('players').update({ is_host: true }).eq('id', targetId)
+      await supabase.from('rooms').update({ host_id: targetId }).eq('id', roomId)
+    },
+    [isHost, playerId, roomId],
+  )
+
   return {
     room,
     players,
@@ -455,6 +557,9 @@ export function useBingoRoom(roomId: string, playerId: string) {
     loading,
     error,
     pendingSubmitters,
+    allGuestsReady,
+    toggleReady,
+    transferHost,
     setBoard,
     setReady,
     presentCard,

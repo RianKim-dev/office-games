@@ -57,5 +57,7 @@ export interface Player {
   is_host: boolean
   /** 이 플레이어가 제출을 마친 턴 번호. room.turn_seq와 같으면 이번 턴 제출 완료 */
   submitted_turn: number | null
+  /** 클라이언트가 주기적으로 갱신하는 접속 확인 시각 */
+  last_seen_at: string
   joined_at: string
 }

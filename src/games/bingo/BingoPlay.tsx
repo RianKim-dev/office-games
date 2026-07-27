@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import type { Player, Room } from '../../lib/types'
 import { completedLineCells, countCompletedLines } from './bingoLogic'
 import { CardFooter, CardTop } from './CardParts'
@@ -18,6 +20,7 @@ interface Props {
   presentCard: (index: number) => Promise<void>
   submitTurn: (index: number | null) => Promise<void>
   advanceTurn: () => Promise<void>
+  leaveRoom: () => Promise<void>
 }
 
 const BINGO_WORD = ['', '원', '투', '쓰리', '포', '파이브']
@@ -36,7 +39,10 @@ export default function BingoPlay({
   presentCard,
   submitTurn,
   advanceTurn,
+  leaveRoom,
 }: Props) {
+  const navigate = useNavigate()
+  const [leaving, setLeaving] = useState(false)
   const currentPlayerId =
     room.turn_order && room.current_turn_index !== null
       ? room.turn_order[room.current_turn_index]
@@ -120,6 +126,7 @@ export default function BingoPlay({
     <AppShell
       title="Projects"
       heading={`${roomKey(room.game_type, room.room_number)} board`}
+      showSearch={false}
       right={
         <span className="turn-indicator">
           {isMyTurn ? '내 차례' : `${currentPlayer?.name ?? '...'}님 차례`}
@@ -141,6 +148,14 @@ export default function BingoPlay({
               celebratingId={celebration?.playerId ?? null}
             />
           </DetailRow>
+          <div className="btn-row">
+            <button className="btn-quiet" onClick={() => navigate('/')}>
+              목록으로 (게임 유지)
+            </button>
+            <button className="btn-danger-quiet" onClick={() => setLeaving(true)}>
+              나가기
+            </button>
+          </div>
         </DetailsPanel>
       }
     >
@@ -247,11 +262,31 @@ export default function BingoPlay({
         {iSubmitted && !iPresented && <span className="action-bar-note">제출 완료</span>}
 
         {isHost && call && pendingSubmitters.length > 0 && (
-          <button className="btn-quiet" disabled={busy} onClick={() => run(advanceTurn)}>
-            턴 넘기기 (방장)
+          <button
+            className="btn-quiet"
+            disabled={busy}
+            onClick={() => run(advanceTurn)}
+            title="아직 제출하지 않은 사람이 있어도 이번 턴을 끝내고 다음 사람에게 넘깁니다"
+          >
+            이 턴 건너뛰기
           </button>
         )}
       </div>
+
+      {leaving && (
+        <ConfirmDialog
+          title="게임 도중에 나갈까요?"
+          body="이번 라운드는 포기하게 되고, 남은 사람이 한 명뿐이면 그 사람의 승리로 끝나요."
+          confirmLabel="나가기"
+          danger
+          onConfirm={async () => {
+            setLeaving(false)
+            await leaveRoom()
+            navigate('/')
+          }}
+          onCancel={() => setLeaving(false)}
+        />
+      )}
     </AppShell>
   )
 }

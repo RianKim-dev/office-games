@@ -57,20 +57,46 @@ export function displayStatus(room: Room): DisplayStatus {
   return elapsed < IN_REVIEW_MS ? 'in_review' : 'done'
 }
 
-const STALE_TTL_MS = 2 * 60 * 60 * 1000
-const DONE_TTL_MS = 24 * 60 * 60 * 1000
+/** 이 시간 넘게 소식이 없으면 접속이 끊긴 것으로 본다 (배지 표시용) */
+export const OFFLINE_MS = 60 * 1000
+/** 이 시간 넘으면 자동으로 내보낸다 */
+export const DROP_MS = 90 * 1000
+
+export function isOnline(lastSeenAt: string | null | undefined): boolean {
+  if (!lastSeenAt) return false
+  return Date.now() - new Date(lastSeenAt).getTime() < OFFLINE_MS
+}
+
+const ENDED_TTL_MS = 30 * 60 * 1000
+const ABANDONED_TTL_MS = 10 * 60 * 1000
 
 /**
- * pg_cron이 30분마다 정리하지만, 랜딩을 여는 시점에도 보조로 한 번 스윕한다.
+ * pg_cron이 5분마다 정리하지만, 랜딩을 여는 시점에도 보조로 한 번 스윕한다.
  * cron 주기 사이의 공백을 메우기 위한 클라이언트 측 보조 장치.
  */
 export async function sweepExpiredRooms() {
   const now = Date.now()
-  const doneCutoff = new Date(now - DONE_TTL_MS).toISOString()
-  const staleCutoff = new Date(now - STALE_TTL_MS).toISOString()
+  const endedCutoff = new Date(now - ENDED_TTL_MS).toISOString()
+  const abandonedCutoff = new Date(now - ABANDONED_TTL_MS).toISOString()
 
-  await supabase.from('rooms').delete().eq('status', 'ended').lt('last_activity_at', doneCutoff)
-  await supabase.from('rooms').delete().lt('last_activity_at', staleCutoff)
+  // 종료되고 한참 지난 방
+  await supabase.from('rooms').delete().eq('status', 'ended').lt('last_activity_at', endedCutoff)
+
+  // 접속자가 아무도 없이 방치된 방. 목록에 "In Progress"로 남아 클릭하면 에러가 나던 것들.
+  const { data: stale } = await supabase
+    .from('rooms')
+    .select('id, players(last_seen_at)')
+    .lt('last_activity_at', abandonedCutoff)
+  const dropCutoff = now - DROP_MS
+  const dead = (stale ?? [])
+    .filter((r) => {
+      const members = (r as { players?: { last_seen_at: string }[] }).players ?? []
+      return members.every((p) => new Date(p.last_seen_at).getTime() < dropCutoff)
+    })
+    .map((r) => r.id)
+  if (dead.length > 0) {
+    await supabase.from('rooms').delete().in('id', dead)
+  }
 }
 
 export async function touchRoom(roomId: string) {

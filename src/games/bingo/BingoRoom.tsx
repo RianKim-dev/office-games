@@ -13,6 +13,7 @@ import BingoFill from './BingoFill'
 import BingoPlay from './BingoPlay'
 import BingoResult from './BingoResult'
 import AppShell from '../../components/AppShell'
+import PhaseAnnounce from '../../components/PhaseAnnounce'
 
 export default function BingoRoom() {
   const { code } = useParams<{ code: string }>()
@@ -94,6 +95,9 @@ function ConnectedRoom({
     loading,
     error,
     pendingSubmitters,
+    allGuestsReady,
+    toggleReady,
+    transferHost,
     setBoard,
     setReady,
     presentCard,
@@ -143,26 +147,26 @@ function ConnectedRoom({
     )
   }
 
-  if (room.status === 'waiting') {
-    return (
+  const winnerName = players.find((p) => p.id === room.winner_id)?.name ?? null
+  const screen =
+    room.status === 'waiting' ? (
       <BingoWaiting
         room={room}
         me={me}
         players={players}
         isHost={isHost}
+        allGuestsReady={allGuestsReady}
         setTopic={setTopic}
         startGame={startGame}
+        toggleReady={toggleReady}
         kickPlayer={kickPlayer}
+        transferHost={transferHost}
         leaveRoom={leaveRoom}
         renameRoom={renameRoom}
       />
-    )
-  }
-  if (room.status === 'filling') {
-    return <BingoFill room={room} me={me} players={players} setBoard={setBoard} setReady={setReady} />
-  }
-  if (room.status === 'playing') {
-    return (
+    ) : room.status === 'filling' ? (
+      <BingoFill room={room} me={me} players={players} setBoard={setBoard} setReady={setReady} />
+    ) : room.status === 'playing' ? (
       <BingoPlay
         room={room}
         me={me}
@@ -173,8 +177,33 @@ function ConnectedRoom({
         presentCard={presentCard}
         submitTurn={submitTurn}
         advanceTurn={advanceTurn}
+        leaveRoom={leaveRoom}
+      />
+    ) : (
+      <BingoResult
+        room={room}
+        players={players}
+        isHost={isHost}
+        reopenRoom={reopenRoom}
+        leaveRoom={leaveRoom}
       />
     )
-  }
-  return <BingoResult room={room} players={players} isHost={isHost} reopenRoom={reopenRoom} />
+
+  return (
+    <>
+      {/* 화면 전환과 무관하게 계속 떠 있어야 국면 변화를 감지할 수 있다 */}
+      <PhaseAnnounce
+        phaseKey={room.status}
+        messageFor={(from, to) => {
+          if (to === 'filling') return { mark: 'START', text: `게임 시작! 주제: ${room.topic ?? ''}` }
+          if (to === 'playing') return { mark: 'GO', text: '모두 준비 완료 — 첫 턴 시작!' }
+          if (to === 'ended')
+            return { mark: 'DONE', text: winnerName ? `${winnerName}님 완료!` : '라운드 종료' }
+          if (from === 'ended' && to === 'waiting') return { mark: 'NEW', text: '새 라운드 준비' }
+          return null
+        }}
+      />
+      {screen}
+    </>
+  )
 }

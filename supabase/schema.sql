@@ -85,6 +85,10 @@ alter table players alter column board set default '[]'::jsonb;
 alter table rooms add column if not exists turn_seq int not null default 0;
 alter table players add column if not exists submitted_turn int;
 
+-- 접속 상태: 방에 있는 클라이언트가 주기적으로 갱신한다.
+-- 브라우저를 그냥 닫은 "유령 참가자" 때문에 게임을 시작할 수 없던 문제를 이걸로 판별한다.
+alter table players add column if not exists last_seen_at timestamptz not null default now();
+
 -- RLS: 로그인이 없는 캐주얼 용도라 사용자별 정책은 만들 수 없음.
 -- anon key로 전체 select/insert/update/delete를 허용하고,
 -- 실질적인 보안은 "추측 불가능한 8자리 방 코드"에 의존한다.
@@ -127,21 +131,31 @@ begin
   end if;
 end $$;
 
--- 방 자동 정리 (터뜨리기): 무료 티어에서도 쓸 수 있는 pg_cron으로 30분마다 스윕.
--- ended 상태는 이제 "In Review"(방금 끝남)/"Done"(시간 지남) 두 단계로 화면에 표시되며
--- 방장이 같은 방에서 라운드를 이어갈 수 있으므로, 종료됐다고 바로 지우지 않는다.
--- - 플레이어가 0명인 방은 즉시 정리 대상 (강퇴/퇴장 시 클라이언트에서도 즉시 삭제 시도함)
--- - ended 상태로 24시간 넘게 방치된 방(=Done으로 표시되고도 한참 지난 방) 삭제
--- - 그 외 상태에서도 활동이 2시간 이상 없으면 삭제
+-- 방 자동 정리 (터뜨리기): 무료 티어에서도 쓸 수 있는 pg_cron으로 5분마다 스윕.
+-- 죽은 방이 목록에 "In Progress"로 계속 떠 있던 문제 때문에 주기와 기준을 모두 조였다.
+-- - 플레이어가 0명인 방은 즉시 정리 대상
+-- - 접속자(last_seen_at 기준)가 아무도 없고 10분 넘게 조용한 방은 상태 무관하게 삭제
+--   (브라우저를 그냥 닫아 방치된 진행중 방이 여기서 걸린다)
+-- - 종료된 방은 30분 뒤 삭제 (그 사이 방장이 "새 라운드"로 이어갈 수 있게 여유를 둠)
 -- (랜딩 접속 시 클라이언트에서도 보조로 한 번 더 스윕함 — src/lib/room.ts의 sweepExpiredRooms)
 create extension if not exists pg_cron;
 
+select cron.unschedule('cleanup-expired-bingo-rooms')
+where exists (select 1 from cron.job where jobname = 'cleanup-expired-bingo-rooms');
+
 select cron.schedule(
   'cleanup-expired-bingo-rooms',
-  '*/30 * * * *',
+  '*/5 * * * *',
   $$
     delete from rooms r where not exists (select 1 from players p where p.room_id = r.id);
-    delete from rooms where status = 'ended' and last_activity_at < now() - interval '24 hours';
-    delete from rooms where last_activity_at < now() - interval '2 hours';
+
+    delete from rooms r
+    where r.last_activity_at < now() - interval '10 minutes'
+      and not exists (
+        select 1 from players p
+        where p.room_id = r.id and p.last_seen_at > now() - interval '90 seconds'
+      );
+
+    delete from rooms where status = 'ended' and last_activity_at < now() - interval '30 minutes';
   $$
 );

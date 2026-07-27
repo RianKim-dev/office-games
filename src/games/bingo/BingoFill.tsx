@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BingoCell, Player, Room } from '../../lib/types'
 import { isBoardFilled } from './bingoLogic'
 import { CardFooter, CardTop } from './CardParts'
@@ -73,6 +73,7 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
   }, [])
 
   async function handleReady() {
+    if (duplicateIndexes.size > 0) return
     await flushBoard()
     await setReady(true, board)
   }
@@ -87,10 +88,30 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
   const readyCount = players.filter((p) => p.is_ready).length
   const activeCount = players.filter((p) => !p.is_eliminated).length
 
+  // 같은 단어를 두 칸에 적으면 한 번의 제시로 두 칸이 지워지는 셈이라 막는다.
+  // 공백과 대소문자는 무시하고 비교한다.
+  const duplicateIndexes = useMemo(() => {
+    const seen = new Map<string, number[]>()
+    for (const c of board) {
+      const key = c.text.trim().toLowerCase().replace(/\s+/g, '')
+      if (!key) continue
+      const list = seen.get(key)
+      if (list) list.push(c.index)
+      else seen.set(key, [c.index])
+    }
+    const dupes = new Set<number>()
+    for (const list of seen.values()) {
+      if (list.length > 1) list.forEach((i) => dupes.add(i))
+    }
+    return dupes
+  }, [board])
+  const hasDuplicates = duplicateIndexes.size > 0
+
   return (
     <AppShell
       title="Projects"
       heading={`${roomKey(room.game_type, room.room_number)} board`}
+      showSearch={false}
       aside={
         <DetailsPanel>
           <DetailRow label="주제">
@@ -128,7 +149,10 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
       <ColumnHeaders roomId={room.id} size={room.size} />
       <div className="board-grid" style={{ gridTemplateColumns: `repeat(${room.size}, 1fr)` }}>
         {board.map((cell) => (
-          <div key={cell.index} className="card">
+          <div
+            key={cell.index}
+            className={`card ${duplicateIndexes.has(cell.index) ? 'card--duplicate' : ''}`}
+          >
             <CardTop cell={cell} />
             <input
               className="card-input"
@@ -137,14 +161,22 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
               onChange={(e) => updateCell(cell.index, e.target.value)}
               placeholder="항목 입력"
             />
+            {duplicateIndexes.has(cell.index) && <div className="card-dupe">중복</div>}
             <CardFooter cell={cell} />
           </div>
         ))}
       </div>
 
+      {hasDuplicates && (
+        <div className="status-note status-note--error">
+          <span className="status-note-icon">!</span>
+          <span>같은 항목이 두 번 이상 있어요. 중복 표시된 칸을 다른 항목으로 바꿔주세요.</span>
+        </div>
+      )}
+
       <div className="action-bar">
         {!me.is_ready && !me.is_eliminated && (
-          <button className="btn-primary" disabled={!filled} onClick={handleReady}>
+          <button className="btn-primary" disabled={!filled || hasDuplicates} onClick={handleReady}>
             준비 완료
           </button>
         )}

@@ -1,13 +1,13 @@
 import { useNavigate } from 'react-router-dom'
-import { useProjectList } from '../lib/useProjectList'
+import { useProjectList, type RowStatus } from '../lib/useProjectList'
 import { roomKey } from '../lib/gameTypes'
-import type { DisplayStatus } from '../lib/types'
 
-const STATUS_LABEL: Record<DisplayStatus, string> = {
+const STATUS_LABEL: Record<RowStatus, string> = {
   todo: 'TO DO',
   in_review: 'IN REVIEW',
   in_progress: 'IN PROGRESS',
   done: 'DONE',
+  stale: '중단됨',
 }
 
 export default function ProjectList({ query = '' }: { query?: string }) {
@@ -36,17 +36,23 @@ export default function ProjectList({ query = '' }: { query?: string }) {
 
   return (
     <div className="project-list">
-      {visible.map(({ room, playerCount, hostName, displayStatus }) => (
-        <button key={room.id} className="project-row" onClick={() => navigate(`/room/${room.id}`)}>
+      {visible.map(({ room, playerCount, onlineCount, hostName, status, canJoin, blockedReason }) => (
+        <button
+          key={room.id}
+          className={`project-row ${canJoin ? '' : 'project-row--blocked'}`}
+          disabled={!canJoin}
+          title={canJoin ? undefined : `입장할 수 없어요 · ${blockedReason}`}
+          onClick={() => navigate(`/room/${room.id}`)}
+        >
           <span className="project-row-key">{roomKey(room.game_type, room.room_number)}</span>
           <span className="project-row-name">{room.display_name}</span>
           <span className="project-row-meta">{hostName ?? '-'}</span>
           <span className="project-row-meta">
             {playerCount}/{room.max_players}
+            {onlineCount > 0 && <span className="project-row-online"> · {onlineCount}명 접속</span>}
           </span>
-          <span className={`status-pill status-pill--${displayStatus}`}>
-            {STATUS_LABEL[displayStatus]}
-          </span>
+          {!canJoin && blockedReason && <span className="project-row-block">{blockedReason}</span>}
+          <span className={`status-pill status-pill--${status}`}>{STATUS_LABEL[status]}</span>
         </button>
       ))}
     </div>

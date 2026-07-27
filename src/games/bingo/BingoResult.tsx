@@ -9,15 +9,20 @@ interface Props {
   players: Player[]
   isHost: boolean
   reopenRoom: () => Promise<void>
+  leaveRoom: () => Promise<void>
 }
 
-export default function BingoResult({ room, players, isHost, reopenRoom }: Props) {
+export default function BingoResult({ room, players, isHost, reopenRoom, leaveRoom }: Props) {
   const navigate = useNavigate()
   const winner = players.find((p) => p.id === room.winner_id) ?? null
   const ranked = [...players].sort((a, b) => remainingCount(a.board) - remainingCount(b.board))
 
   return (
-    <AppShell title="Projects" heading={`${roomKey(room.game_type, room.room_number)} board`}>
+    <AppShell
+      title="Projects"
+      heading={`${roomKey(room.game_type, room.room_number)} board`}
+      showSearch={false}
+    >
       <div className="result-banner">
         {winner ? (
           <>
@@ -83,10 +88,17 @@ export default function BingoResult({ room, players, isHost, reopenRoom }: Props
 
       <div className="btn-row" style={{ marginTop: 10 }}>
         <button className="btn-quiet" onClick={() => navigate('/')}>
-          목록으로
+          목록으로 (방에 남음)
         </button>
-        <button className="btn-quiet" onClick={() => navigate('/new')}>
-          새 프로젝트 만들기
+        {/* 끝난 방에서 마지막 사람이 나가면 방이 자동으로 정리된다 */}
+        <button
+          className="btn-danger-quiet"
+          onClick={async () => {
+            await leaveRoom()
+            navigate('/')
+          }}
+        >
+          방 나가기
         </button>
       </div>
     </AppShell>

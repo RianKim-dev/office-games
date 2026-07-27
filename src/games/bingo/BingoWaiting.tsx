@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Player, Room } from '../../lib/types'
 import { randomTopic } from '../../lib/topics'
 import { roomKey } from '../../lib/gameTypes'
 import AppShell from '../../components/AppShell'
 import { DetailRow, DetailsPanel } from '../../components/DetailsPanel'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import PlayerRoster from './PlayerRoster'
 
 interface Props {
@@ -11,9 +13,12 @@ interface Props {
   me: Player
   players: Player[]
   isHost: boolean
+  allGuestsReady: boolean
   setTopic: (topic: string) => Promise<void>
   startGame: () => Promise<void>
+  toggleReady: () => Promise<void>
   kickPlayer: (targetId: string) => Promise<void>
+  transferHost: (targetId: string) => Promise<void>
   leaveRoom: () => Promise<void>
   renameRoom: (name: string) => Promise<void>
 }
@@ -23,21 +28,28 @@ export default function BingoWaiting({
   me,
   players,
   isHost,
+  allGuestsReady,
   setTopic,
   startGame,
+  toggleReady,
   kickPlayer,
+  transferHost,
   leaveRoom,
   renameRoom,
 }: Props) {
+  const navigate = useNavigate()
   const [customTopic, setCustomTopic] = useState('')
   const [useCustom, setUseCustom] = useState(false)
   const [starting, setStarting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(room.display_name)
+  const [confirming, setConfirming] = useState<
+    { kind: 'kick' | 'host'; player: Player } | { kind: 'leave' } | null
+  >(null)
 
   const enoughPlayers = players.length >= 2
-  const canStart = enoughPlayers && !!room.topic && !starting
+  const canStart = enoughPlayers && !!room.topic && allGuestsReady && !starting
 
   async function handleStart() {
     if (!canStart) return
@@ -67,10 +79,23 @@ export default function BingoWaiting({
     setEditingName(false)
   }
 
+  async function runConfirm() {
+    const c = confirming
+    setConfirming(null)
+    if (!c) return
+    if (c.kind === 'kick') await kickPlayer(c.player.id)
+    else if (c.kind === 'host') await transferHost(c.player.id)
+    else {
+      await leaveRoom()
+      navigate('/')
+    }
+  }
+
   return (
     <AppShell
       title="Projects"
       heading={`${roomKey(room.game_type, room.room_number)} board`}
+      showSearch={false}
       aside={
         <DetailsPanel>
           <DetailRow label="프로젝트">
@@ -121,7 +146,8 @@ export default function BingoWaiting({
               players={players}
               meId={me.id}
               isHost={isHost}
-              onKick={kickPlayer}
+              onKick={(p) => setConfirming({ kind: 'kick', player: p })}
+              onTransferHost={(p) => setConfirming({ kind: 'host', player: p })}
             />
           </DetailRow>
 
@@ -129,13 +155,25 @@ export default function BingoWaiting({
             <button className="btn-secondary" onClick={copyLink}>
               {copied ? '복사됨' : '초대 링크 복사'}
             </button>
-            <button className="btn-danger-quiet" onClick={leaveRoom}>
+          </div>
+          <div className="btn-row">
+            <button className="btn-quiet" onClick={() => navigate('/')}>
+              목록으로 (방에 남음)
+            </button>
+            <button className="btn-danger-quiet" onClick={() => setConfirming({ kind: 'leave' })}>
               나가기
             </button>
           </div>
         </DetailsPanel>
       }
     >
+      {allGuestsReady && enoughPlayers && (
+        <div className="ready-banner">
+          <span className="bingo-banner-mark">READY</span>
+          <span className="ready-banner-text">전원 준비 완료!</span>
+        </div>
+      )}
+
       <section className="panel">
         <h2 className="panel-title">라운드 설정</h2>
 
@@ -193,18 +231,57 @@ export default function BingoWaiting({
               <button className="btn-primary btn-block" disabled={!canStart} onClick={handleStart}>
                 {starting ? '시작하는 중…' : '게임 시작'}
               </button>
-              {!enoughPlayers && (
+              {!enoughPlayers ? (
                 <p className="field-hint">최소 2명이 모여야 시작할 수 있어요.</p>
-              )}
+              ) : !allGuestsReady ? (
+                <p className="field-hint">참가자 전원이 준비를 눌러야 시작할 수 있어요.</p>
+              ) : null}
             </>
           ) : (
-            <div className="status-note status-note--wait">
-              <span className="status-note-icon">◷</span>
-              <span>방장이 게임을 시작하길 기다리는 중이에요.</span>
-            </div>
+            <>
+              <button
+                className={me.is_ready ? 'btn-secondary btn-block' : 'btn-primary btn-block'}
+                onClick={toggleReady}
+              >
+                {me.is_ready ? '준비 취소' : '준비 완료'}
+              </button>
+              <div className="status-note status-note--wait">
+                <span className="status-note-icon">◷</span>
+                <span>
+                  {me.is_ready
+                    ? '방장이 게임을 시작하길 기다리는 중이에요.'
+                    : '준비가 끝나면 위 버튼을 눌러주세요.'}
+                </span>
+              </div>
+            </>
           )}
         </div>
       </section>
+
+      {confirming && (
+        <ConfirmDialog
+          title={
+            confirming.kind === 'kick'
+              ? `${confirming.player.name}님을 내보낼까요?`
+              : confirming.kind === 'host'
+                ? `${confirming.player.name}님에게 방장을 넘길까요?`
+                : '이 방에서 나갈까요?'
+          }
+          body={
+            confirming.kind === 'kick'
+              ? '내보낸 뒤에도 다시 입장할 수 있어요.'
+              : confirming.kind === 'host'
+                ? '방장 권한(시작·강퇴·설정)이 넘어가고 나는 일반 참가자가 돼요.'
+                : '나가면 참가자 목록에서 빠져요. 다시 들어올 수 있어요.'
+          }
+          confirmLabel={
+            confirming.kind === 'kick' ? '내보내기' : confirming.kind === 'host' ? '넘기기' : '나가기'
+          }
+          danger={confirming.kind !== 'host'}
+          onConfirm={runConfirm}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
     </AppShell>
   )
 }
