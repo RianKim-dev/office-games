@@ -4,6 +4,8 @@ import { isBoardFilled } from './bingoLogic'
 import { CardFooter, CardTop } from './CardParts'
 import ColumnHeaders from './ColumnHeaders'
 import AppShell from '../../components/AppShell'
+import { DetailRow, DetailsPanel } from '../../components/DetailsPanel'
+import PlayerRoster from './PlayerRoster'
 import { roomKey } from '../../lib/gameTypes'
 
 interface Props {
@@ -86,18 +88,41 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
   const activeCount = players.filter((p) => !p.is_eliminated).length
 
   return (
-    <AppShell title="Projects" heading={`${roomKey(room.game_type, room.room_number)} board`}>
+    <AppShell
+      title="Projects"
+      heading={`${roomKey(room.game_type, room.room_number)} board`}
+      aside={
+        <DetailsPanel>
+          <DetailRow label="주제">
+            <span className="detail-topic">{room.topic}</span>
+          </DetailRow>
+          <DetailRow label="승리 조건">{room.win_condition}빙고</DetailRow>
+          <DetailRow label={`참가자 (${players.length})`}>
+            <PlayerRoster room={room} players={players} meId={me.id} />
+          </DetailRow>
+        </DetailsPanel>
+      }
+    >
       {me.is_eliminated ? (
-        <p className="notice notice--muted">시간 내에 채우지 못해 이번 라운드는 관전으로 전환됐어요.</p>
+        <div className="status-note status-note--wait">
+          <span className="status-note-icon">!</span>
+          <span>시간 내에 채우지 못해 이번 라운드는 관전으로 전환됐어요.</span>
+        </div>
       ) : me.is_ready ? (
-        <p className="notice">
-          제출 완료. 다른 팀원을 기다리는 중… ({readyCount}/{activeCount})
-        </p>
+        <div className="status-note status-note--wait">
+          <span className="status-note-icon">◷</span>
+          <span>
+            제출 완료. 다른 팀원을 기다리는 중… ({readyCount}/{activeCount})
+          </span>
+        </div>
       ) : (
-        <>
-          {remaining !== null && <p className="notice notice--timer">남은 시간 {remaining}초</p>}
-          <p className="field-hint">'{room.topic}'에 맞는 항목을 각 칸에 입력해주세요.</p>
-        </>
+        <div className="status-note">
+          <span className="status-note-icon">→</span>
+          <span>
+            <strong>'{room.topic}'</strong>에 맞는 항목을 각 칸에 입력해주세요.
+            {remaining !== null && ` (남은 시간 ${remaining}초)`}
+          </span>
+        </div>
       )}
 
       <ColumnHeaders roomId={room.id} size={room.size} />
@@ -117,25 +142,15 @@ export default function BingoFill({ room, me, players, setBoard, setReady }: Pro
         ))}
       </div>
 
-      {!me.is_ready && !me.is_eliminated && (
-        <button className="doc-btn doc-btn--wide" disabled={!filled} onClick={handleReady}>
-          준비 완료
+      <div className="action-bar">
+        {!me.is_ready && !me.is_eliminated && (
+          <button className="btn-primary" disabled={!filled} onClick={handleReady}>
+            준비 완료
+          </button>
+        )}
+        <button className="btn-secondary" onClick={copyLink}>
+          {copied ? '복사됨' : '초대 링크 복사'}
         </button>
-      )}
-
-      <button className="doc-btn doc-btn--ghost" onClick={copyLink}>
-        {copied ? '링크 복사됨' : '초대 링크 복사'}
-      </button>
-
-      <div className="player-strip">
-        {players.map((p) => (
-          <span
-            key={p.id}
-            className={`player-chip ${p.is_ready ? 'is-ready' : ''} ${p.is_eliminated ? 'is-out' : ''}`}
-          >
-            {p.name}
-          </span>
-        ))}
       </div>
     </AppShell>
   )

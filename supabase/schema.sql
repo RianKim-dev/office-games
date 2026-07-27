@@ -79,6 +79,12 @@ end $$;
 
 alter table players alter column board set default '[]'::jsonb;
 
+-- 턴 제출 모델: 카드가 제시될 때마다 turn_seq가 1 증가하고, 각 플레이어는 자기가
+-- 제출을 마친 턴 번호를 submitted_turn에 남긴다. submitted_turn = turn_seq 인 사람이
+-- 이번 턴 제출을 끝낸 사람. 이렇게 비교만 하므로 턴이 넘어갈 때 전원 UPDATE가 필요 없다.
+alter table rooms add column if not exists turn_seq int not null default 0;
+alter table players add column if not exists submitted_turn int;
+
 -- RLS: 로그인이 없는 캐주얼 용도라 사용자별 정책은 만들 수 없음.
 -- anon key로 전체 select/insert/update/delete를 허용하고,
 -- 실질적인 보안은 "추측 불가능한 8자리 방 코드"에 의존한다.

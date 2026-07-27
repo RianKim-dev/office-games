@@ -93,11 +93,13 @@ function ConnectedRoom({
     isMyTurn,
     loading,
     error,
+    pendingSubmitters,
     setBoard,
     setReady,
     presentCard,
-    matchCard,
+    submitTurn,
     advanceTurn,
+    setTopic,
     startGame,
     reopenRoom,
     kickPlayer,
@@ -148,6 +150,7 @@ function ConnectedRoom({
         me={me}
         players={players}
         isHost={isHost}
+        setTopic={setTopic}
         startGame={startGame}
         kickPlayer={kickPlayer}
         leaveRoom={leaveRoom}
@@ -164,9 +167,11 @@ function ConnectedRoom({
         room={room}
         me={me}
         players={players}
+        isHost={isHost}
         isMyTurn={isMyTurn}
+        pendingSubmitters={pendingSubmitters}
         presentCard={presentCard}
-        matchCard={matchCard}
+        submitTurn={submitTurn}
         advanceTurn={advanceTurn}
       />
     )

@@ -104,6 +104,26 @@ export function hasWon(board: BingoCell[], size: number, winCondition: number): 
   return countCompletedLines(board, size) >= winCondition
 }
 
+/** 완성된 줄에 속한 칸 index 집합 (완성된 줄을 화면에서 강조하는 데 쓴다) */
+export function completedLineCells(board: BingoCell[], size: number): Set<number> {
+  const cleared = (i: number) => board[i]?.cleared ?? false
+  const result = new Set<number>()
+  const addIfComplete = (idx: number[]) => {
+    if (idx.every(cleared)) idx.forEach((i) => result.add(i))
+  }
+
+  for (let r = 0; r < size; r++) {
+    addIfComplete(Array.from({ length: size }, (_, c) => r * size + c))
+  }
+  for (let c = 0; c < size; c++) {
+    addIfComplete(Array.from({ length: size }, (_, r) => r * size + c))
+  }
+  addIfComplete(Array.from({ length: size }, (_, i) => i * size + i))
+  addIfComplete(Array.from({ length: size }, (_, i) => i * size + (size - 1 - i)))
+
+  return result
+}
+
 export function remainingCount(board: BingoCell[]): number {
   return board.filter((cell) => !cell.cleared).length
 }

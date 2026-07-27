@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { clearSavedPlayerId, reconcileRoomMembership, shuffle, touchRoom } from '../../lib/room'
 import type { BingoCell, Player, Room } from '../../lib/types'
 import { createEmptyBoard, hasWon, isBoardCleared, isBoardFilled } from './bingoLogic'
+import { randomTopic } from '../../lib/topics'
 
 const TURN_SECONDS = 30
 const FILL_SECONDS = 2 * 60
@@ -188,7 +189,7 @@ export function useBingoRoom(roomId: string, playerId: string) {
       .eq('current_turn_index', room.current_turn_index)
   }, [room, roomId, findNextTurnIndex])
 
-  // 시간제한 모드: 턴 마감 지나면 자동으로 다음 턴
+  // 시간제한 모드: 턴 마감 지나면 미제출자가 있어도 그냥 넘어간다
   useEffect(() => {
     if (!room || room.status !== 'playing' || !room.timed || !room.turn_deadline) return
     const deadline = new Date(room.turn_deadline).getTime()
@@ -197,6 +198,25 @@ export function useBingoRoom(roomId: string, playerId: string) {
     }, 1000)
     return () => clearInterval(timer)
   }, [room, advanceTurn])
+
+  /** 이번 턴에 아직 제출하지 않은 사람들 (제시자 본인은 제외) */
+  const pendingSubmitters = useMemo(() => {
+    if (!room || room.status !== 'playing' || !room.current_call) return []
+    return activePlayers.filter(
+      (p) => p.id !== room.current_call!.playerId && p.submitted_turn !== room.turn_seq,
+    )
+  }, [room, activePlayers])
+
+  // 전원 제출 완료 시 자동으로 다음 턴. 모든 클라이언트가 시도하지만
+  // advanceTurn의 조건부 update(current_turn_index 일치) 덕분에 한 번만 성공한다.
+  const advancingRef = useRef(0)
+  useEffect(() => {
+    if (!room || room.status !== 'playing' || !room.current_call) return
+    if (pendingSubmitters.length > 0) return
+    if (advancingRef.current === room.turn_seq) return // 이 턴은 이미 넘기려고 시도함
+    advancingRef.current = room.turn_seq
+    void advanceTurn()
+  }, [room, pendingSubmitters, advanceTurn])
 
   const isMyTurn = useMemo(() => {
     if (!room || room.status !== 'playing' || !room.turn_order || room.current_turn_index === null)
@@ -245,6 +265,8 @@ export function useBingoRoom(roomId: string, playerId: string) {
 
       const newBoard = me.board.map((c) => (c.index === cellIndex ? { ...c, cleared: true } : c))
       await setBoard(newBoard)
+      // 제시하는 순간 턴 번호를 올린다. 이 번호와 각자의 submitted_turn을 비교해
+      // 이번 턴에 누가 아직 제출을 안 했는지 판단한다.
       await supabase
         .from('rooms')
         .update({
@@ -255,6 +277,7 @@ export function useBingoRoom(roomId: string, playerId: string) {
             text: cell.text,
             presentedAt: new Date().toISOString(),
           },
+          turn_seq: room.turn_seq + 1,
           last_activity_at: new Date().toISOString(),
         })
         .eq('id', roomId)
@@ -265,33 +288,86 @@ export function useBingoRoom(roomId: string, playerId: string) {
     [room, me, isMyTurn, playerId, roomId, setBoard, checkAndReportWin],
   )
 
-  const matchCard = useCallback(
-    async (cellIndex: number) => {
+  /**
+   * 이번 턴 제출. cellIndex가 null이면 "일치 없음"(칸을 지우지 않고 제출만 기록).
+   * 제출은 한 턴에 한 번만 가능하다 — 이게 여러 칸을 연달아 지우던 문제를 막는다.
+   */
+  const submitTurn = useCallback(
+    async (cellIndex: number | null) => {
       if (!room || !me || !room.current_call) return
       if (room.current_call.playerId === playerId) return
-      const cell = me.board[cellIndex]
-      if (!cell || cell.cleared) return
+      if (me.submitted_turn === room.turn_seq) return // 이미 제출함
 
-      const newBoard = me.board.map((c) =>
-        c.index === cellIndex ? { ...c, cleared: true, matchedFrom: room.current_call!.text } : c,
-      )
-      await setBoard(newBoard)
-      await checkAndReportWin(newBoard)
+      if (cellIndex !== null) {
+        const cell = me.board[cellIndex]
+        if (!cell || cell.cleared) return
+        const newBoard = me.board.map((c) =>
+          c.index === cellIndex ? { ...c, cleared: true, matchedFrom: room.current_call!.text } : c,
+        )
+        await supabase
+          .from('players')
+          .update({ board: newBoard, submitted_turn: room.turn_seq })
+          .eq('id', playerId)
+        await checkAndReportWin(newBoard)
+      } else {
+        await supabase
+          .from('players')
+          .update({ submitted_turn: room.turn_seq })
+          .eq('id', playerId)
+      }
     },
-    [room, me, playerId, setBoard, checkAndReportWin],
+    [room, me, playerId, checkAndReportWin],
   )
 
-  /** waiting -> filling: 주제를 정하고 전원 보드를 새로 만들어 게임을 시작한다 (최초 시작/재시작 공통) */
-  const startGame = useCallback(
+  /**
+   * 대기 중 주제를 바꾼다. 로컬 상태가 아니라 방에 바로 기록해서
+   * 참가자들도 시작 전에 어떤 주제인지 실시간으로 볼 수 있게 한다.
+   */
+  const setTopic = useCallback(
     async (topic: string) => {
-      if (!room || room.status !== 'waiting' || players.length === 0) return
+      if (!isHost || !room || room.status !== 'waiting' || !topic.trim()) return
+      await supabase
+        .from('rooms')
+        .update({ topic: topic.trim(), last_activity_at: new Date().toISOString() })
+        .eq('id', roomId)
+        .eq('status', 'waiting')
+    },
+    [isHost, room, roomId],
+  )
+
+  // 대기 상태인데 주제가 비어있으면 방장이 랜덤으로 하나 채워 넣는다
+  const seedingTopicRef = useRef(false)
+  useEffect(() => {
+    if (!isHost || !room || room.status !== 'waiting' || room.topic) return
+    if (seedingTopicRef.current) return
+    seedingTopicRef.current = true
+    void supabase
+      .from('rooms')
+      .update({ topic: randomTopic() })
+      .eq('id', roomId)
+      .eq('status', 'waiting')
+      .is('topic', null)
+      .then(() => {
+        seedingTopicRef.current = false
+      })
+  }, [isHost, room, roomId])
+
+  /** waiting -> filling: 전원 보드를 새로 만들어 게임을 시작한다 (주제는 이미 방에 기록되어 있다) */
+  const startGame = useCallback(
+    async () => {
+      if (!room || room.status !== 'waiting' || players.length === 0 || !room.topic) return
       const now = new Date().toISOString()
 
       await Promise.all(
         players.map((p) =>
           supabase
             .from('players')
-            .update({ board: createEmptyBoard(room.size), is_ready: false, is_eliminated: false })
+            .update({
+              board: createEmptyBoard(room.size),
+              is_ready: false,
+              is_eliminated: false,
+              submitted_turn: null,
+            })
             .eq('id', p.id),
         ),
       )
@@ -299,7 +375,6 @@ export function useBingoRoom(roomId: string, playerId: string) {
       await supabase
         .from('rooms')
         .update({
-          topic,
           status: 'filling',
           turn_order: null,
           current_turn_index: null,
@@ -323,7 +398,7 @@ export function useBingoRoom(roomId: string, playerId: string) {
       players.map((p) =>
         supabase
           .from('players')
-          .update({ board: [], is_ready: false, is_eliminated: false })
+          .update({ board: [], is_ready: false, is_eliminated: false, submitted_turn: null })
           .eq('id', p.id),
       ),
     )
@@ -333,6 +408,7 @@ export function useBingoRoom(roomId: string, playerId: string) {
       .update({
         status: 'waiting',
         topic: null,
+        turn_seq: 0,
         turn_order: null,
         current_turn_index: null,
         current_call: null,
@@ -378,11 +454,13 @@ export function useBingoRoom(roomId: string, playerId: string) {
     isMyTurn,
     loading,
     error,
+    pendingSubmitters,
     setBoard,
     setReady,
     presentCard,
-    matchCard,
+    submitTurn,
     advanceTurn,
+    setTopic,
     startGame,
     reopenRoom,
     kickPlayer,

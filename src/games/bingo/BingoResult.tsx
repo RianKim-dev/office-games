@@ -53,7 +53,15 @@ export default function BingoResult({ room, players, isHost, reopenRoom }: Props
               >
                 {p.board.map((cell) => (
                   <div key={cell.index} className={`mini-card ${cell.cleared ? 'mini-card--done' : ''}`}>
-                    {cell.text}
+                    <span className="mini-card-text">{cell.text}</span>
+                    {/* 무엇으로 지워졌는지 — 정확히 일치할 필요는 없는 규칙이라
+                        끝나고 서로 확인할 수 있도록 원문을 같이 보여준다 */}
+                    {cell.cleared &&
+                      (cell.matchedFrom ? (
+                        <span className="mini-card-origin">← {cell.matchedFrom}</span>
+                      ) : (
+                        <span className="mini-card-origin mini-card-origin--self">직접 제시</span>
+                      ))}
                   </div>
                 ))}
               </div>
@@ -63,16 +71,24 @@ export default function BingoResult({ room, players, isHost, reopenRoom }: Props
       </div>
 
       {isHost ? (
-        <button className="doc-btn doc-btn--wide" onClick={reopenRoom}>
+        <button className="btn-primary btn-block" onClick={reopenRoom}>
           새 라운드 시작
         </button>
       ) : (
-        <p className="notice notice--muted">방장이 새 라운드를 시작하길 기다리는 중…</p>
+        <div className="status-note status-note--wait">
+          <span className="status-note-icon">◷</span>
+          <span>방장이 새 라운드를 시작하길 기다리는 중이에요.</span>
+        </div>
       )}
 
-      <button className="doc-btn doc-btn--ghost" onClick={() => navigate('/new')}>
-        새 프로젝트 만들기
-      </button>
+      <div className="btn-row" style={{ marginTop: 10 }}>
+        <button className="btn-quiet" onClick={() => navigate('/')}>
+          목록으로
+        </button>
+        <button className="btn-quiet" onClick={() => navigate('/new')}>
+          새 프로젝트 만들기
+        </button>
+      </div>
     </AppShell>
   )
 }

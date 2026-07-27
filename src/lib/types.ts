@@ -41,6 +41,7 @@ export interface Room {
   current_call: CurrentCall | null
   turn_deadline: string | null
   fill_deadline: string | null
+  turn_seq: number
   winner_id: string | null
   created_at: string
   last_activity_at: string
@@ -54,5 +55,7 @@ export interface Player {
   is_ready: boolean
   is_eliminated: boolean
   is_host: boolean
+  /** 이 플레이어가 제출을 마친 턴 번호. room.turn_seq와 같으면 이번 턴 제출 완료 */
+  submitted_turn: number | null
   joined_at: string
 }

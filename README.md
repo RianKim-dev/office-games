@@ -39,6 +39,15 @@ npm run dev
 - Supabase 연결 완료, `schema.sql` 마이그레이션 적용 완료 — 로컬에서 방 생성/목록 실시간 반영 확인함
 - Vercel 배포됨: https://office-games-sigma.vercel.app
 
+### ⚠️ 스키마 마이그레이션 필요 (3단계 턴 제출 모델)
+
+턴 제출 모델을 도입하면서 컬럼이 두 개 늘었다. **Supabase SQL Editor에서 `supabase/schema.sql`을 다시 실행**해야 게임이 동작한다 (여러 번 실행해도 안전). 급하면 이 두 줄만 실행해도 된다:
+
+```sql
+alter table rooms   add column if not exists turn_seq int not null default 0;
+alter table players add column if not exists submitted_turn int;
+```
+
 ### ⚠️ 남은 작업
 
 1. **Vercel 환경변수 설정 (필수, 아직 안 됨)** — 배포본 콘솔에 "VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY가 설정되지 않았습니다" 경고가 뜬다.

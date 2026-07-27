@@ -21,6 +21,8 @@ interface Props {
   search?: string
   onSearchChange?: (value: string) => void
   right?: ReactNode
+  /** 넘기면 지라 이슈 상세화면처럼 본문 + 우측 Details 패널 2단이 된다 */
+  aside?: ReactNode
   children: ReactNode
 }
 
@@ -32,6 +34,7 @@ export default function AppShell({
   search,
   onSearchChange,
   right,
+  aside,
   children,
 }: Props) {
   const searchable = onSearchChange !== undefined
@@ -71,7 +74,14 @@ export default function AppShell({
         {right && <div className="shell-toolbar-right">{right}</div>}
       </div>
 
-      <div className="shell-body">{children}</div>
+      {aside ? (
+        <div className="shell-body shell-body--split">
+          <div className="shell-main">{children}</div>
+          <aside className="shell-aside">{aside}</aside>
+        </div>
+      ) : (
+        <div className="shell-body">{children}</div>
+      )}
     </div>
   )
 }
