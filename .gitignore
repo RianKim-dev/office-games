@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# MediaPipe 자산 (합쳐서 33MB). scripts/fetch-vision-assets.mjs가 postinstall로 준비한다
+public/mediapipe
+public/models
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
